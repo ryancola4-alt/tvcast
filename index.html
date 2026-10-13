@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#06070b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TV Cast">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>TV Cast</title>
+<style>
+:root{
+  --bg:#06070b; --ink:#eef1f8; --mute:#8a92a6; --dim:#5b6276;
+  --a1:#7aa2ff; --a2:#b48cff; --a3:#5ee0ff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171;
+  --glass:rgba(16,18,28,.62); --glass-hi:rgba(255,255,255,.14); --line:rgba(255,255,255,.12);
+  --r:20px; --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
+  --safe-l:env(safe-area-inset-left); --safe-r:env(safe-area-inset-right);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overscroll-behavior:none}
+body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable","Segoe UI",Roboto,Inter,sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;overflow:hidden}
+button{font:inherit;color:inherit}
+.hidden{display:none!important}
+.aurora{position:fixed;inset:-20%;z-index:0;pointer-events:none;filter:blur(60px);opacity:.75;
+  background:radial-gradient(40% 35% at 20% 15%,#24305e 0%,transparent 70%),
+             radial-gradient(35% 30% at 85% 85%,#3b1d5a 0%,transparent 70%),
+             radial-gradient(30% 25% at 70% 20%,#103a4a 0%,transparent 70%);
+  animation:drift 24s ease-in-out infinite alternate}
+@keyframes drift{to{transform:translate3d(3%,-2%,0) rotate(6deg)}}
+
+/* ---------- glass ---------- */
+.glass{position:relative;background:linear-gradient(160deg,rgba(255,255,255,.10),rgba(255,255,255,.03) 45%,rgba(255,255,255,.06));
+  background-color:var(--glass);border-radius:var(--r);
+  backdrop-filter:blur(26px) saturate(170%);-webkit-backdrop-filter:blur(26px) saturate(170%);
+  box-shadow:0 18px 50px rgba(0,0,0,.55),0 2px 0 rgba(255,255,255,.06) inset,0 -1px 0 rgba(0,0,0,.4) inset}
+.glass::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;
+  background:linear-gradient(140deg,rgba(255,255,255,.38),rgba(255,255,255,.04) 40%,rgba(180,140,255,.25) 75%,rgba(94,224,255,.3));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
+.sheen{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none}
+.sheen::after{content:"";position:absolute;top:-60%;left:-60%;width:60%;height:220%;transform:rotate(25deg);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.09),transparent);animation:sheen 7s ease-in-out infinite}
+@keyframes sheen{0%,55%{left:-70%}100%{left:140%}}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:14px;cursor:pointer;
+  border:1px solid var(--line);background:rgba(255,255,255,.07);font-weight:600;transition:transform .12s,background .2s,box-shadow .2s}
+.btn:active{transform:scale(.97)}
+.btn.primary{border:0;color:#090b12;background:linear-gradient(135deg,var(--a1),var(--a2));box-shadow:0 8px 30px rgba(122,162,255,.35)}
+.btn.block{width:100%}
+.btn.small{padding:8px 12px;font-size:13px;border-radius:11px}
+.btn.danger{color:var(--bad)}
+.icon-btn{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;cursor:pointer;border:1px solid var(--line);
+  background:rgba(12,14,22,.45);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:background .2s,transform .12s}
+.icon-btn:active{transform:scale(.94)}
+.icon-btn.on{background:rgba(122,162,255,.25);border-color:rgba(122,162,255,.5)}
+svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- connect screen ---------- */
+#connect{position:fixed;inset:0;z-index:1;display:grid;place-items:center;padding:calc(20px + var(--safe-t)) 18px calc(20px + var(--safe-b));overflow:auto}
+.card{width:min(440px,100%);padding:28px 22px}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.logo{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;flex:none;
+  background:linear-gradient(135deg,var(--a1),var(--a2));box-shadow:0 8px 30px rgba(122,162,255,.4)}
+.brand h1{font-size:21px;margin:0;font-weight:700;letter-spacing:.2px}
+.sub{color:var(--mute);font-size:13px}
+.codebox{display:flex;gap:5px;justify-content:center;margin:18px 0 8px;position:relative}
+.codebox span{flex:1 1 0;min-width:0;max-width:40px;height:48px;border-radius:11px;display:grid;place-items:center;font:600 22px ui-monospace,SFMono-Regular,Consolas,monospace;
+  background:rgba(0,0,0,.35);border:1px solid var(--line);transition:border-color .15s,box-shadow .15s}
+.codebox span.cur{border-color:var(--a1);box-shadow:0 0 0 3px rgba(122,162,255,.18)}
+.codebox .dash{flex:0 0 10px;border:0;background:none;color:var(--dim)}
+#codeInput{position:absolute;inset:0;opacity:0;font-size:16px;text-transform:uppercase}
+.err{color:var(--bad);font-size:13px;min-height:20px;text-align:center;margin:6px 0}
+.list{margin-top:20px;display:grid;gap:8px}
+.dev{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid var(--line);cursor:pointer}
+.dev b{flex:1;font-weight:600}
+.links{display:flex;justify-content:space-between;margin-top:18px}
+.link{background:none;border:0;color:var(--a1);cursor:pointer;padding:6px 0;font-size:14px}
+
+/* ---------- watch screen ---------- */
+#watch{position:fixed;inset:0;z-index:1;background:#000}
+#stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000}
+@media (orientation:portrait){#stage{bottom:auto;top:calc(56px + var(--safe-t));aspect-ratio:16/9;width:100%}}
+tv-player{display:block;width:100%;height:100%}
+tv-player video{object-fit:contain;background:#000}
+.topbar{position:absolute;left:0;right:0;top:0;z-index:5;display:flex;align-items:center;gap:8px;
+  padding:calc(8px + var(--safe-t)) calc(12px + var(--safe-r)) 8px calc(12px + var(--safe-l));
+  background:linear-gradient(rgba(0,0,0,.65),transparent);transition:opacity .35s}
+.topbar .title{flex:1;min-width:0}
+.topbar .title b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{position:absolute;z-index:4;left:calc(10px + var(--safe-l));bottom:10px;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#c9cfdd;
+  padding:5px 10px;border-radius:999px;background:rgba(10,12,20,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);transition:opacity .35s;pointer-events:none}
+#watch.idle .pill{opacity:0}
+@media (orientation:portrait){#watch.idle .pill{opacity:1}}
+@media (orientation:landscape){.pill{bottom:calc(14px + var(--safe-b))}}
+@media (max-width:520px) and (orientation:portrait){#fsBtn{display:none}.icon-btn{width:38px;height:38px;border-radius:12px}.topbar{gap:6px}}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+.pill.ok i{background:var(--ok);box-shadow:0 0 8px var(--ok)} .pill.warn i{background:var(--warn);box-shadow:0 0 8px var(--warn)} .pill.bad i{background:var(--bad)}
+#watch.idle .topbar{opacity:0;pointer-events:none}
+@media (orientation:portrait){#watch.idle .topbar{opacity:1;pointer-events:auto}}
+.center-msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--mute);pointer-events:none;padding:20px}
+.spinner{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:var(--a1);animation:spin 1s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#soundChip{position:absolute;z-index:6;left:50%;transform:translateX(-50%);bottom:calc(16px + var(--safe-b));padding:10px 16px;border-radius:999px;cursor:pointer;
+  display:flex;gap:8px;align-items:center;font-weight:600;font-size:14px}
+@media (orientation:portrait){#soundChip{bottom:auto;top:calc(56px + var(--safe-t) + 56.25vw - 56px)}}
+
+/* ---------- remote ---------- */
+#remote{position:absolute;z-index:8;font-size:16px;width:13.5em;padding:.7em .75em .9em;touch-action:none;
+  border-radius:1.6em;transition:box-shadow .3s,opacity .25s}
+#remote.dragging{box-shadow:0 26px 80px rgba(0,0,0,.7),0 0 0 1px rgba(122,162,255,.35)}
+#remote.mini .body{display:none}
+.r-head{display:flex;align-items:center;gap:.3em;margin-bottom:.55em;cursor:grab}
+.r-head .grip{flex:1;height:1.6em;display:grid;place-items:center}
+.r-head .grip i{width:2.6em;height:.28em;border-radius:1em;background:rgba(255,255,255,.28)}
+.r-mini{width:1.9em;height:1.9em;border-radius:.6em;display:grid;place-items:center;border:0;background:rgba(255,255,255,.06);cursor:pointer;color:var(--mute)}
+.r-mini svg{width:1.05em;height:1.05em}
+.r-mini.on{color:var(--a1);background:rgba(122,162,255,.18)}
+.row{display:flex;justify-content:space-between;gap:.45em;margin:.45em 0}
+.key{position:relative;flex:1;height:2.6em;border-radius:.9em;border:1px solid rgba(255,255,255,.1);cursor:pointer;
+  display:grid;place-items:center;color:#dfe5f3;touch-action:none;
+  background:linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.03));
+  box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 -2px 6px rgba(0,0,0,.35) inset,0 4px 12px rgba(0,0,0,.3);
+  transition:transform .08s,box-shadow .2s,background .2s}
+.key svg{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.key small{font-size:.62em;font-weight:700;letter-spacing:.06em;pointer-events:none}
+.key.pressed,.dpad .seg.pressed{transform:scale(.94);background:linear-gradient(180deg,rgba(122,162,255,.38),rgba(180,140,255,.2));
+  box-shadow:0 0 0 1px rgba(122,162,255,.6),0 0 22px rgba(122,162,255,.55),0 0 2px rgba(255,255,255,.8) inset}
+.key.fail{box-shadow:0 0 0 1px rgba(248,113,113,.7),0 0 18px rgba(248,113,113,.5)}
+.key.unset{opacity:.35}
+.key.power{color:#ff9aa8}
+.dpad{position:relative;width:11.6em;height:11.6em;margin:.7em auto .8em;border-radius:50%;
+  background:radial-gradient(circle at 50% 35%,rgba(255,255,255,.12),rgba(255,255,255,.02) 70%);
+  box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 -3px 10px rgba(0,0,0,.45) inset,0 10px 26px rgba(0,0,0,.45);
+  border:1px solid rgba(255,255,255,.1)}
+.dpad::after{content:"";position:absolute;inset:-6px;border-radius:50%;pointer-events:none;opacity:.55;
+  background:conic-gradient(from 0deg,transparent,rgba(122,162,255,.35),transparent 30%,rgba(94,224,255,.3),transparent 60%,rgba(180,140,255,.35),transparent);
+  -webkit-mask:radial-gradient(circle,transparent 66%,#000 67%,#000 70%,transparent 71%);mask:radial-gradient(circle,transparent 66%,#000 67%,#000 70%,transparent 71%);
+  animation:spin 9s linear infinite}
+.dpad .seg{position:absolute;display:grid;place-items:center;cursor:pointer;color:#cfd6e6;border-radius:50%;transition:transform .08s,background .2s,box-shadow .2s;touch-action:none}
+.dpad .seg svg{width:1.3em;height:1.3em;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.seg.up{left:35%;top:2%;width:30%;height:30%} .seg.down{left:35%;bottom:2%;width:30%;height:30%}
+.seg.left{left:2%;top:35%;width:30%;height:30%} .seg.right{right:2%;top:35%;width:30%;height:30%}
+.seg.ok{left:30%;top:30%;width:40%;height:40%;font-weight:700;letter-spacing:.08em;font-size:.85em;color:#fff;
+  background:radial-gradient(circle at 50% 30%,rgba(255,255,255,.28),rgba(122,162,255,.18) 60%,rgba(40,50,80,.4));
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 6px 18px rgba(0,0,0,.5),0 0 18px rgba(122,162,255,.25);
+  animation:breathe 4s ease-in-out infinite}
+@keyframes breathe{50%{box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 6px 18px rgba(0,0,0,.5),0 0 28px rgba(122,162,255,.45)}}
+.rocker{flex:1;display:flex;flex-direction:column;border-radius:1em;overflow:hidden;border:1px solid rgba(255,255,255,.1);
+  background:linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,.03));box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.rocker .key{border:0;border-radius:0;height:2.3em;box-shadow:none;background:none}
+.rocker .lbl{text-align:center;font-size:.58em;font-weight:700;letter-spacing:.12em;color:var(--mute);padding:.2em 0}
+.r-mid{display:flex;flex-direction:column;gap:.45em;flex:1}
+.numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:.45em;margin-top:.5em}
+.numpad .key{height:2.3em;font-weight:600}
+#remote.editing .key,#remote.editing .seg{outline:1px dashed rgba(251,191,36,.6);outline-offset:-3px}
+.resize{position:absolute;right:.25em;bottom:.25em;width:1.4em;height:1.4em;cursor:nwse-resize;touch-action:none;opacity:.5}
+.resize::before{content:"";position:absolute;right:.25em;bottom:.25em;width:.7em;height:.7em;border-right:2px solid #fff;border-bottom:2px solid #fff;border-radius:0 0 .25em 0}
+.lat{font-size:.6em;color:var(--dim);text-align:center;margin-top:.4em;letter-spacing:.04em}
+
+/* ---------- sheets ---------- */
+.scrim{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;animation:fade .2s}
+@media (min-width:700px){.scrim{align-items:center}}
+@keyframes fade{from{opacity:0}}
+.sheet{width:min(480px,100%);max-height:88vh;overflow:auto;padding:20px 20px calc(20px + var(--safe-b));border-radius:24px 24px 0 0;animation:up .25s cubic-bezier(.2,.8,.2,1)}
+@media (min-width:700px){.sheet{border-radius:24px}}
+@keyframes up{from{transform:translateY(30px);opacity:0}}
+.sheet h2{margin:0 0 4px;font-size:18px}
+.sheet .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+label.f{display:block;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 6px}
+select,input[type=text],input[type=url]{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:rgba(0,0,0,.35);color:var(--ink);font:inherit;font-size:16px;-webkit-user-select:text;user-select:text}
+input[type=range]{width:100%;accent-color:var(--a1)}
+.qr{background:#fff;padding:14px;border-radius:16px;width:max-content;margin:14px auto}
+.qr img,.qr canvas{display:block;width:200px;height:200px}
+.bigcode{text-align:center;font:700 28px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.12em;margin:6px 0 14px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow .btn{flex:1}
+.checks{list-style:none;padding:0;margin:8px 0 0}
+.checks li{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;align-items:flex-start}
+.checks li:last-child{border:0}
+.checks .st{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;margin-top:1px}
+.st.ok{background:rgba(74,222,128,.18);color:var(--ok)} .st.warn{background:rgba(251,191,36,.18);color:var(--warn)}
+.st.bad{background:rgba(248,113,113,.18);color:var(--bad)} .st.run{border:2px solid rgba(255,255,255,.15);border-top-color:var(--a1);animation:spin 1s linear infinite}
+.checks .t b{display:block;font-weight:600} .checks .t span{color:var(--mute);font-size:13px}
+pre.cmd{white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,.4);border:1px solid var(--line);border-radius:12px;padding:12px;font:13px ui-monospace,Consolas,monospace;-webkit-user-select:all;user-select:all}
+.toast{position:fixed;z-index:40;left:50%;bottom:calc(24px + var(--safe-b));transform:translateX(-50%);padding:10px 16px;border-radius:14px;font-size:14px;max-width:90vw;animation:up .2s}
+.note{font-size:13px;color:var(--mute);margin:8px 0}
+ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 0}
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+
+<!-- ================= CONNECT ================= -->
+<section id="connect">
+  <div class="card glass"><div class="sheen"></div>
+    <div class="brand">
+      <div class="logo"><svg class="i" viewBox="0 0 24 24" style="stroke:#0a0b12;stroke-width:2.2"><rect x="3" y="5" width="18" height="12" rx="2.5"/><path d="M8 21h8M12 17v4"/></svg></div>
+      <div><h1>TV Cast</h1><div class="sub">Watch and control your TV box anywhere</div></div>
+    </div>
+    <div class="sub" style="text-align:center">Enter the 8-character code from your Pi</div>
+    <div class="codebox" id="codebox">
+      <span></span><span></span><span></span><span></span><span class="dash">–</span><span></span><span></span><span></span><span></span>
+      <input id="codeInput" inputmode="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="12" aria-label="Pairing code">
+    </div>
+    <div class="err" id="connErr"></div>
+    <button class="btn primary block" id="connectBtn">Connect</button>
+    <div class="list" id="devList"></div>
+    <div class="links">
+      <button class="link" id="setupLink">Set up a new Pi</button>
+      <button class="link" id="installLink">Install this app</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= WATCH ================= -->
+<section id="watch" class="hidden">
+  <div id="stage">
+    <span class="pill" id="pill"><i></i><span id="pillTxt">Connecting</span></span>
+    <div class="center-msg" id="stageMsg"><div><div class="spinner"></div><div id="stageTxt">Connecting…</div></div></div>
+  </div>
+  <div class="topbar">
+    <button class="icon-btn" id="backBtn" title="Devices"><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="title"><b id="devName">TV Box</b></div>
+    <button class="icon-btn" id="muteBtn" title="Sound (S)"></button>
+    <button class="icon-btn" id="checkBtn" title="Check connection"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>
+    <button class="icon-btn" id="shareBtn" title="Invite"><svg class="i" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button>
+    <button class="icon-btn" id="setBtn" title="Settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    <button class="icon-btn" id="fsBtn" title="Full screen (F)"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    <button class="icon-btn on" id="remoteBtn" title="Remote (R)"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/><path d="M10 14h.01M14 14h.01M10 17h.01M14 17h.01"/></svg></button>
+  </div>
+  <button class="glass hidden" id="soundChip"></button>
+
+  <!-- floating remote -->
+  <div id="remote" class="glass"><div class="sheen"></div>
+    <div class="r-head" id="rHead">
+      <button class="r-mini" id="editBtn" title="Edit keys: learn, test, clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+      <div class="grip"><i></i></div>
+      <button class="r-mini" id="numBtn" title="Number pad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 5h.01M12 5h.01M19 5h.01M5 12h.01M12 12h.01M19 12h.01M5 19h.01M12 19h.01M19 19h.01"/></svg></button>
+      <button class="r-mini" id="miniBtn" title="Minimize"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 12h12"/></svg></button>
+    </div>
+    <div class="body" id="rBody"></div>
+    <div class="resize" id="rResize"></div>
+  </div>
+</section>
+
+<script>
+/* ======================================================================
+   TV Cast — phone / desktop app. Pairs with the Raspberry Pi service (pi/tvcast.py).
+   The page holds no secrets: the 8-character code you type is the only key, and it
+   stays on this device. The Pi's address is fetched from ntfy.sh encrypted with that code.
+   ====================================================================== */
+const $ = (s, el = document) => el.querySelector(s);
+const ALPHA = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('tvcast.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('tvcast.' + k, JSON.stringify(v)); } catch {} },
+};
+const qs = new URLSearchParams(location.search);
+const NTFY = (qs.get('ntfy') || LS.get('ntfy', '') || 'https://ntfy.sh').replace(/\/$/, '');
+const APP_URL = location.origin + location.pathname.replace(/index\.html$/, '');
+const enc = s => new TextEncoder().encode(s);
+const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const normCode = s => (s || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+const pretty = c => c.slice(0, 4) + '-' + c.slice(4);
+const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+
+function toast(msg, kind = '') {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = document.createElement('div');
+  t.className = 'toast glass'; t.textContent = msg;
+  if (kind === 'bad') t.style.color = 'var(--bad)';
+  document.body.appendChild(t); setTimeout(() => t.remove(), 3200);
+}
+
+async function fetchT(url, opts = {}, ms = 6000) {
+  const c = new AbortController(); const id = setTimeout(() => c.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: c.signal, cache: 'no-store' }); } finally { clearTimeout(id); }
+}
+
+/* ---------------- keys (must match derive() in tvcast.py) ---------------- */
+const keyCache = {};
+async function derive(code, purpose) {
+  const base = await crypto.subtle.importKey('raw', enc(code), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc('tvcast/v1/' + purpose), iterations: 150000 }, base, 256);
+  return new Uint8Array(bits);
+}
+const hex = u => [...u].map(b => b.toString(16).padStart(2, '0')).join('');
+async function keysFor(code) {
+  code = normCode(code);
+  if (keyCache[code]) return keyCache[code];
+  const [t, k, a] = await Promise.all([derive(code, 'topic'), derive(code, 'key'), derive(code, 'auth')]);
+  return keyCache[code] = {
+    topic: 'tvcast-' + hex(t).slice(0, 24),
+    aes: await crypto.subtle.importKey('raw', k, 'AES-GCM', false, ['decrypt']),
+    token: hex(a),
+  };
+}
+
+/* Find the Pi: try the last address first, then look it up (encrypted) on ntfy. */
+async function lookup(code, keys) {
+  const r = await fetchT(`${NTFY}/${keys.topic}/json?poll=1&since=all`, {}, 8000);
+  if (!r.ok) throw new Error('lookup ' + r.status);
+  const lines = (await r.text()).trim().split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(m => m.event === 'message');
+  for (const m of lines.reverse()) {
+    try {
+      const box = JSON.parse(m.message);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(box.iv), additionalData: enc('tvcast') }, keys.aes, b64d(box.ct));
+      return JSON.parse(new TextDecoder().decode(pt));
+    } catch {}
+  }
+  return null;
+}
+async function probe(url, keys) {
+  const t0 = performance.now();
+  const r = await fetchT(`${url}/api/status?t=${keys.token}`, {}, 5000);
+  if (r.status === 401) throw Object.assign(new Error('wrong code'), { auth: true });
+  if (!r.ok) throw new Error('status ' + r.status);
+  const s = await r.json();
+  return { status: s, ms: Math.round(performance.now() - t0) };
+}
+async function resolve(dev, { fresh = false } = {}) {
+  const keys = await keysFor(dev.code);
+  const tried = new Set();
+  const cands = [dev.override, fresh ? null : dev.url].filter(Boolean);
+  for (const u of cands) {
+    tried.add(u);
+    try { const p = await probe(u, keys); return { url: u, keys, ...p }; } catch (e) { if (e.auth) throw e; }
+  }
+  if (dev.override) throw new Error('The custom server address is not answering.');
+  const info = await lookup(dev.code, keys).catch(() => { throw new Error("Couldn't reach the lookup service. Check your internet."); });
+  if (!info) throw new Error('No Pi found for this code. Check the code, and that the Pi is on.');
+  if (tried.has(info.url)) throw new Error('Your Pi was found but is not answering. It may be restarting — try again in a minute.');
+  let last;
+  for (let i = 0; i < 4; i++) {          // brand-new tunnels can take a few seconds to resolve
+    try { const p = await probe(info.url, keys); return { url: info.url, keys, name: info.name, ...p }; }
+    catch (e) { if (e.auth) throw e; last = e; await sleep(1500); }
+  }
+  throw new Error('Your Pi was found but is not answering (' + (last?.message || 'timeout') + ').');
+}
+
+/* ---------------- devices ---------------- */
+const devices = () => LS.get('devices', []);
+function saveDevice(d) {
+  const list = devices().filter(x => x.code !== d.code);
+  list.unshift({ code: d.code, name: d.name || 'TV Box', url: d.url || '', override: d.override || '' });
+  LS.set('devices', list.slice(0, 6));
+}
+function forgetDevice(code) { LS.set('devices', devices().filter(x => x.code !== code)); }
+
+/* ---------------- connect screen ---------------- */
+const codeInput = $('#codeInput');
+function drawCode() {
+  const v = normCode(codeInput.value).slice(0, 8);
+  const spans = [...$('#codebox').querySelectorAll('span:not(.dash)')];
+  spans.forEach((s, i) => { s.textContent = v[i] || ''; s.classList.toggle('cur', i === Math.min(v.length, 7) && document.activeElement === codeInput); });
+}
+codeInput.addEventListener('input', () => {
+  const v = normCode(codeInput.value).replace(/[^2-9A-HJKMNP-Z]/g, '').slice(0, 8);
+  codeInput.value = v; drawCode(); $('#connErr').textContent = '';
+  if (v.length === 8) connectWith({ code: v });
+});
+codeInput.addEventListener('focus', drawCode); codeInput.addEventListener('blur', drawCode);
+codeInput.addEventListener('paste', e => {
+  const t = (e.clipboardData || window.clipboardData).getData('text');
+  const m = t.match(/#c=([0-9A-Za-z-]+)/); if (m) { e.preventDefault(); codeInput.value = normCode(m[1]); codeInput.dispatchEvent(new Event('input')); }
+});
+$('#connectBtn').onclick = () => {
+  const v = normCode(codeInput.value);
+  if (v.length !== 8) { $('#connErr').textContent = 'The code has 8 characters.'; codeInput.focus(); return; }
+  connectWith({ code: v });
+};
+function drawDevices() {
+  const el = $('#devList'); el.innerHTML = '';
+  devices().forEach(d => {
+    const row = document.createElement('div'); row.className = 'dev';
+    row.innerHTML = `<svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2.5"/><path d="M8 21h8M12 17v4"/></svg><b></b><span class="sub">${pretty(d.code)}</span>`;
+    row.querySelector('b').textContent = d.name;
+    row.onclick = () => connectWith(d);
+    el.appendChild(row);
+  });
+}
+function showConnect(err = '') {
+  stopWatching();
+  $('#watch').classList.add('hidden'); $('#connect').classList.remove('hidden');
+  $('#connErr').textContent = err; drawDevices(); drawCode();
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+}
+
+/* ---------------- watching ---------------- */
+let cur = null;          // { dev, url, keys, status }
+let player = null, ctl = null, watchdogTID = 0, lastFrame = 0, frames = 0, fps = 0, mode = '';
+let PlayerClass = null, playerOrigin = '';
+
+async function loadPlayer(url) {
+  if (PlayerClass) return PlayerClass;
+  const { VideoRTC } = await import(`${url}/player/video-rtc.js`);
+  playerOrigin = url;
+  PlayerClass = class TvPlayer extends VideoRTC {
+    constructor() { super(); this.mode = 'webrtc,mse'; this.media = 'video,audio'; }
+    oninit() {
+      super.oninit();
+      this.video.controls = false; this.video.autoplay = true; this.video.muted = LS.get('muted', false);
+      const tick = () => { lastFrame = performance.now(); frames++; this.video.requestVideoFrameCallback(tick); };
+      if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) this.video.requestVideoFrameCallback(tick);
+      else this.video.addEventListener('timeupdate', () => { lastFrame = performance.now(); frames += 6; });
+      this.video.addEventListener('volumechange', drawSound);
+      this.video.addEventListener('playing', () => { $('#stageMsg').classList.add('hidden'); drawSound(); });
+    }
+    onopen() {
+      if (!this.ws) return [];          // socket was closed before it opened (go2rtc player race)
+      const r = super.onopen();
+      this.onmessage['tvcast'] = m => {
+        if (m.type === 'mse') setMode('mse');
+        if (m.type === 'error') { console.warn('stream', m.value); if (!lastFrame) stageText('The Pi is up, but the picture isn\'t ready yet: ' + m.value); }
+      };
+      return r;
+    }
+    onpcvideo(v) { super.onpcvideo(v); if (this.pcState === WebSocket.OPEN) setMode('rtc'); }
+  };
+  customElements.define('tv-player', PlayerClass);
+  return PlayerClass;
+}
+
+function stageText(t, spin = true) {
+  $('#stageMsg').classList.remove('hidden');
+  $('#stageTxt').textContent = t;
+  $('#stageMsg .spinner').style.display = spin ? '' : 'none';
+}
+function setPill(kind, text) { const p = $('#pill'); p.className = 'pill ' + kind; $('#pillTxt').textContent = text; }
+function setMode(m) { mode = m; updatePill(); }
+async function updatePill() {
+  if (!player) return;
+  const age = performance.now() - lastFrame;
+  if (!lastFrame || age > 4000) { setPill('warn', lastFrame ? 'Reconnecting…' : 'Starting…'); return; }
+  let txt = mode === 'rtc' ? 'Direct' : 'Relay', kind = mode === 'rtc' ? 'ok' : 'ok';
+  if (mode === 'rtc' && player.pc) {
+    try {
+      const st = await player.pc.getStats(); let pair, local;
+      st.forEach(r => { if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
+      if (pair) st.forEach(r => { if (r.id === pair.localCandidateId) local = r; });
+      if (local) txt = local.candidateType === 'host' ? 'Direct · home Wi-Fi' : local.candidateType === 'relay' ? 'Relay' : 'Direct · internet';
+      if (pair && pair.currentRoundTripTime != null) txt += ` · ${Math.round(pair.currentRoundTripTime * 1000)} ms`;
+    } catch {}
+  } else if (mode === 'mse') txt = 'Encrypted relay';
+  setPill(kind, `${txt} · ${fps || '–'} fps`);
+}
+
+async function connectWith(dev) {
+  dev = { ...(devices().find(d => d.code === normCode(dev.code)) || {}), ...dev, code: normCode(dev.code) };
+  $('#connect').classList.add('hidden'); $('#watch').classList.remove('hidden');
+  $('#devName').textContent = dev.name || 'TV Box';
+  stageText('Finding your Pi…'); setPill('warn', 'Connecting');
+  try {
+    const r = await resolve(dev);
+    cur = { dev, ...r };
+    dev.url = r.url; dev.name = r.status.name || r.name || dev.name;
+    saveDevice(dev); LS.set('last', dev.code);
+    $('#devName').textContent = dev.name;
+    await startWatching();
+  } catch (e) {
+    showConnect(e.auth ? 'That code was not accepted.' : e.message);
+  }
+}
+
+async function startWatching() {
+  stageText(cur.status.capture?.ok === false ? cur.status.capture.error : 'Starting the picture…', cur.status.capture?.ok !== false);
+  try { await loadPlayer(cur.url); }
+  catch (e) { stageText('Could not load the player from your Pi: ' + e.message, false); return; }
+  if (player) player.remove();
+  player = new PlayerClass(); lastFrame = 0; mode = '';
+  $('#stage').prepend(player);
+  player.src = `${cur.url}/api/ws?t=${cur.keys.token}`;
+  connectControl();
+  clearInterval(watchdogTID);
+  let stalled = 0, f0 = frames;
+  watchdogTID = setInterval(async () => {
+    fps = Math.max(0, Math.round((frames - f0) / 2)); f0 = frames; updatePill();
+    if (document.hidden || !player) return;
+    const age = performance.now() - lastFrame;
+    if ((lastFrame && age > 8000) || (!lastFrame && ++stalled > 10)) {     // frozen: find the Pi again (tunnel may have changed)
+      stalled = 0; lastFrame = 0; await reconnect();
+    }
+  }, 2000);
+}
+async function reconnect() {
+  if (!cur) return;
+  setPill('warn', 'Reconnecting…');
+  try {
+    const r = await resolve(cur.dev, { fresh: false }).catch(() => resolve(cur.dev, { fresh: true }));
+    const moved = r.url !== cur.url;
+    Object.assign(cur, r); cur.dev.url = r.url; saveDevice(cur.dev);
+    if (moved || !player) { await startWatching(); return; }
+    player.ondisconnect(); player.wsState = WebSocket.CLOSED; player.src = `${cur.url}/api/ws?t=${cur.keys.token}`;
+    if (!ctl || ctl.readyState > 1) connectControl();
+  } catch (e) { setPill('bad', 'Offline — retrying'); }
+}
+function stopWatching() {
+  clearInterval(watchdogTID); watchdogTID = 0;
+  if (player) { try { player.ondisconnect(); } catch {} player.remove(); player = null; }
+  if (ctl) { ctl.onclose = null; ctl.close(); ctl = null; }
+  cur = null;
+}
+window.addEventListener('online', () => cur && reconnect());
+
+/* ---------------- sound ---------------- */
+const ICON_SOUND = '<svg class="i" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>';
+const ICON_MUTED = '<svg class="i" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>';
+function drawSound() {
+  const v = player?.video; const muted = !v || v.muted;
+  $('#muteBtn').innerHTML = muted ? ICON_MUTED : ICON_SOUND;
+  $('#muteBtn').classList.toggle('on', !muted);
+  const chip = $('#soundChip');
+  chip.innerHTML = ICON_MUTED + '<span>Tap for sound</span>';
+  chip.classList.toggle('hidden', !(v && v.muted && !LS.get('muted', false) && lastFrame));
+}
+function toggleSound(force) {
+  const v = player?.video; if (!v) return;
+  v.muted = force != null ? !force : !v.muted; LS.set('muted', v.muted);
+  if (!v.muted) v.play().catch(() => {});
+  drawSound();
+}
+$('#muteBtn').onclick = () => toggleSound();
+$('#soundChip').onclick = () => toggleSound(true);
+
+/* ---------------- control channel ---------------- */
+let ctlId = 0, ctlBackoff = 1000, pending = new Map(), ctlRtt = 0, keyLat = 0;
+function connectControl() {
+  if (!cur) return;
+  if (ctl) { ctl.onclose = null; ctl.close(); }
+  const ws = new WebSocket(`${cur.url.replace(/^http/, 'ws')}/ctl?t=${cur.keys.token}`);
+  ctl = ws;
+  ws.onopen = () => { ctlBackoff = 1000; ping(); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'hello' && m.box !== 'ready') toast('TV box: ' + (m.detail || m.box), 'bad');
+    const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
+    if (m.type === 'pong') { ctlRtt = Math.round(performance.now() - p.t0); drawLat(); }
+    if (m.type === 'ack') { keyLat = Math.round(performance.now() - p.t0); drawLat(); if (!m.ok) { p.el?.classList.add('fail'); setTimeout(() => p.el?.classList.remove('fail'), 600); toast(m.err || 'Key failed', 'bad'); } }
+    p.resolve?.(m);
+  };
+  ws.onclose = () => { if (ctl !== ws || !cur) return; setTimeout(connectControl, ctlBackoff); ctlBackoff = Math.min(ctlBackoff * 2, 15000); };
+}
+function ctlSend(msg, el) {
+  return new Promise(resolve => {
+    const id = ++ctlId; msg.id = id;
+    pending.set(id, { t0: performance.now(), el, resolve });
+    const go = () => ctl.send(JSON.stringify(msg));
+    if (ctl && ctl.readyState === 1) go();
+    else { const t = setInterval(() => { if (ctl && ctl.readyState === 1) { clearInterval(t); go(); } }, 100); setTimeout(() => { clearInterval(t); if (pending.has(id)) { pending.delete(id); resolve({ ok: false, err: 'not connected' }); } }, 4000); }
+    setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, err: 'timeout' }); } }, 12000);
+  });
+}
+function ping() { return ctlSend({ type: 'ping' }); }
+setInterval(() => { if (ctl && ctl.readyState === 1) ping(); }, 15000);
+function drawLat() { const el = $('#lat'); if (el) el.textContent = `remote ${keyLat ? keyLat + ' ms' : '–'} · link ${ctlRtt ? ctlRtt + ' ms' : '–'}`; }
+
+/* ---------------- remote: keys, layout, edit (learn / test / clear) ---------------- */
+const P = {   // custom SVG icon paths
+  power: '<path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/>',
+  home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
+  back: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  up: '<path d="M6 15l6-6 6 6"/>', down: '<path d="M6 9l6 6 6-6"/>', left: '<path d="M15 6l-6 6 6 6"/>', right: '<path d="M9 6l6 6-6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>',
+  mute: '<path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/>',
+  rew: '<path d="M11 19l-9-7 9-7zM22 19l-9-7 9-7z"/>', ff: '<path d="M13 19l9-7-9-7zM2 19l9-7-9-7z"/>',
+  play: '<path d="M6 4l10 8-10 8z"/><path d="M19 5v14"/>',
+  guide: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
+  apps: '<rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+};
+const svg = n => `<svg viewBox="0 0 24 24">${P[n] || ''}</svg>`;
+const DEFAULT_KEYS = {
+  power: 'KEYCODE_POWER', home: 'KEYCODE_HOME', back: 'KEYCODE_BACK', menu: 'KEYCODE_MENU',
+  up: 'KEYCODE_DPAD_UP', down: 'KEYCODE_DPAD_DOWN', left: 'KEYCODE_DPAD_LEFT', right: 'KEYCODE_DPAD_RIGHT', ok: 'KEYCODE_DPAD_CENTER',
+  volup: 'KEYCODE_VOLUME_UP', voldn: 'KEYCODE_VOLUME_DOWN', mute: 'KEYCODE_VOLUME_MUTE',
+  chup: 'KEYCODE_CHANNEL_UP', chdn: 'KEYCODE_CHANNEL_DOWN',
+  rew: 'KEYCODE_MEDIA_REWIND', play: 'KEYCODE_MEDIA_PLAY_PAUSE', ff: 'KEYCODE_MEDIA_FAST_FORWARD',
+  guide: 'KEYCODE_GUIDE', info: 'KEYCODE_INFO', apps: 'KEYCODE_APP_SWITCH', search: 'KEYCODE_SEARCH',
+  ...Object.fromEntries([...Array(10)].map((_, i) => ['n' + i, 'KEYCODE_' + i])),
+};
+const LABELS = { power: 'Power', home: 'Home', back: 'Back', menu: 'Menu', up: 'Up', down: 'Down', left: 'Left', right: 'Right', ok: 'OK',
+  volup: 'Volume +', voldn: 'Volume −', mute: 'Mute', chup: 'Channel +', chdn: 'Channel −', rew: 'Rewind', play: 'Play / Pause', ff: 'Fast-forward',
+  guide: 'Guide', info: 'Info', apps: 'Recent apps', search: 'Search', ...Object.fromEntries([...Array(10)].map((_, i) => ['n' + i, String(i)])) };
+const REPEAT = new Set(['up', 'down', 'left', 'right', 'volup', 'voldn', 'chup', 'chdn']);
+const COMMON = ['DPAD_UP', 'DPAD_DOWN', 'DPAD_LEFT', 'DPAD_RIGHT', 'DPAD_CENTER', 'ENTER', 'BACK', 'HOME', 'MENU', 'POWER', 'SLEEP', 'WAKEUP',
+  'VOLUME_UP', 'VOLUME_DOWN', 'VOLUME_MUTE', 'CHANNEL_UP', 'CHANNEL_DOWN', 'PAGE_UP', 'PAGE_DOWN', 'LAST_CHANNEL', 'MEDIA_PLAY_PAUSE', 'MEDIA_PLAY',
+  'MEDIA_PAUSE', 'MEDIA_STOP', 'MEDIA_REWIND', 'MEDIA_FAST_FORWARD', 'MEDIA_NEXT', 'MEDIA_PREVIOUS', 'GUIDE', 'INFO', 'TV', 'DVR', 'CAPTIONS',
+  'SETTINGS', 'SEARCH', 'APP_SWITCH', 'PROG_RED', 'PROG_GREEN', 'PROG_YELLOW', 'PROG_BLUE', 'DEL', ...[...Array(10)].map((_, i) => String(i))].map(k => 'KEYCODE_' + k);
+let keymap = { ...DEFAULT_KEYS, ...LS.get('keymap', {}) };
+
+function keyHTML(id, inner, cls = '') { return `<div class="key ${cls}" data-k="${id}" title="${LABELS[id]}">${inner}</div>`; }
+function buildRemote() {
+  const showNum = LS.get('numpad', false);
+  $('#rBody').innerHTML = `
+    <div class="row">${keyHTML('power', svg('power'), 'power')}${keyHTML('home', svg('home'))}${keyHTML('back', svg('back'))}${keyHTML('menu', svg('menu'))}</div>
+    <div class="dpad">
+      <div class="seg up" data-k="up">${svg('up')}</div><div class="seg down" data-k="down">${svg('down')}</div>
+      <div class="seg left" data-k="left">${svg('left')}</div><div class="seg right" data-k="right">${svg('right')}</div>
+      <div class="seg ok" data-k="ok">OK</div>
+    </div>
+    <div class="row">
+      <div class="rocker">${keyHTML('volup', svg('plus'))}<div class="lbl">VOL</div>${keyHTML('voldn', svg('minus'))}</div>
+      <div class="r-mid">${keyHTML('mute', svg('mute'))}${keyHTML('guide', svg('guide'))}${keyHTML('apps', svg('apps'))}</div>
+      <div class="rocker">${keyHTML('chup', svg('up'))}<div class="lbl">CH</div>${keyHTML('chdn', svg('down'))}</div>
+    </div>
+    <div class="row">${keyHTML('rew', svg('rew'))}${keyHTML('play', svg('play'))}${keyHTML('ff', svg('ff'))}</div>
+    <div class="numpad ${showNum ? '' : 'hidden'}">
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => keyHTML('n' + n, `<span>${n}</span>`)).join('')}
+      ${keyHTML('info', svg('info'))}${keyHTML('n0', '<span>0</span>')}${keyHTML('search', svg('search'))}
+    </div>
+    <div class="lat" id="lat"></div>`;
+  $('#numBtn').classList.toggle('on', showNum);
+  $('#rBody').querySelectorAll('[data-k]').forEach(el => {
+    el.classList.toggle('unset', !keymap[el.dataset.k]);
+    bindKey(el);
+  });
+  drawLat();
+}
+
+let editing = false;
+function bindKey(el) {
+  const id = el.dataset.k; let t0 = 0, rep = 0, longT = 0, fired = false;
+  const down = e => {
+    e.preventDefault(); el.setPointerCapture?.(e.pointerId);
+    if (editing) { openKeyEditor(id); return; }
+    el.classList.add('pressed'); vib(8); fired = false; t0 = performance.now();
+    if (REPEAT.has(id)) {
+      press(id, 'press', el); fired = true;
+      rep = setTimeout(function again() { press(id, 'press', el); vib(4); rep = setTimeout(again, 130); }, 420);
+    } else {
+      longT = setTimeout(() => { fired = true; press(id, 'long', el); vib(20); }, 650);
+    }
+  };
+  const up = () => {
+    el.classList.remove('pressed'); clearTimeout(rep); clearTimeout(longT);
+    if (!editing && !fired && t0) press(id, 'press', el);
+    t0 = 0;
+  };
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', () => { t0 = 0; up(); });
+  el.addEventListener('contextmenu', e => e.preventDefault());
+}
+function press(id, how = 'press', el) {
+  const key = keymap[id];
+  if (!key) { toast(`${LABELS[id]} has no key set. Tap ✎ to set it.`); return; }
+  if (el) { el.classList.add('pressed'); setTimeout(() => el.classList.remove('pressed'), 120); }
+  return ctlSend({ type: 'key', key, mode: how }, el);
+}
+
+/* drag + resize + minimize, remembered per orientation */
+const remote = $('#remote');
+const layoutKey = () => 'remote.' + (innerWidth > innerHeight ? 'land' : 'port');
+function placeRemote() {
+  const s = LS.get(layoutKey(), null);
+  const fs = s?.fs || (innerWidth < 500 ? Math.min(16, (innerWidth - 40) / 13.5) : 16);
+  remote.style.fontSize = fs + 'px';
+  fitRemote();
+  const w = remote.offsetWidth, h = remote.offsetHeight;
+  let x, y;
+  if (s) { x = s.x * innerWidth - w / 2; y = s.y * innerHeight - h / 2; }
+  else if (innerWidth > innerHeight) { x = innerWidth - w - 18; y = Math.max(topReserve() + 8, (innerHeight - h) / 2); }
+  else { x = (innerWidth - w) / 2; const top = 56 + innerWidth * 9 / 16 + 14; y = Math.max(top, innerHeight - h - 18); }
+  clampRemote(x, y);
+  remote.classList.toggle('mini', LS.get('mini', false));
+}
+const topReserve = () => innerWidth > innerHeight ? 58 : 0;   // keep the top bar's buttons clear
+function fitRemote() {             // never taller/wider than the screen (e.g. phone in landscape)
+  const fs = parseFloat(remote.style.fontSize) || 16;
+  const k = Math.min(1, (innerHeight - 24 - topReserve()) / remote.offsetHeight, (innerWidth - 24) / remote.offsetWidth);
+  if (k < 1) remote.style.fontSize = Math.max(9, fs * k) + 'px';
+}
+function clampRemote(x, y) {
+  const w = remote.offsetWidth, h = remote.offsetHeight;
+  x = Math.max(6, Math.min(innerWidth - w - 6, x)); y = Math.max(6, Math.min(innerHeight - h - 6, y));
+  remote.style.left = x + 'px'; remote.style.top = y + 'px';
+}
+function saveRemote() {
+  const r = remote.getBoundingClientRect();
+  LS.set(layoutKey(), { x: (r.left + r.width / 2) / innerWidth, y: (r.top + r.height / 2) / innerHeight, fs: parseFloat(remote.style.fontSize) });
+}
+(() => {
+  let sx, sy, ox, oy, drag = false;
+  $('#rHead').addEventListener('pointerdown', e => {
+    if (e.target.closest('.r-mini')) return;
+    drag = true; sx = e.clientX; sy = e.clientY; ox = remote.offsetLeft; oy = remote.offsetTop;
+    remote.classList.add('dragging'); $('#rHead').setPointerCapture(e.pointerId);
+  });
+  $('#rHead').addEventListener('pointermove', e => { if (drag) clampRemote(ox + e.clientX - sx, oy + e.clientY - sy); });
+  const end = () => { if (!drag) return; drag = false; remote.classList.remove('dragging'); saveRemote(); };
+  $('#rHead').addEventListener('pointerup', end); $('#rHead').addEventListener('pointercancel', end);
+
+  let rs = null;
+  $('#rResize').addEventListener('pointerdown', e => {
+    e.stopPropagation(); rs = { x: e.clientX, fs: parseFloat(remote.style.fontSize) || 16, w: remote.offsetWidth };
+    $('#rResize').setPointerCapture(e.pointerId); remote.classList.add('dragging');
+  });
+  $('#rResize').addEventListener('pointermove', e => {
+    if (!rs) return;
+    const fs = Math.max(10, Math.min(26, rs.fs * (rs.w + e.clientX - rs.x) / rs.w));
+    remote.style.fontSize = fs + 'px'; clampRemote(remote.offsetLeft, remote.offsetTop);
+  });
+  const rend = () => { if (!rs) return; rs = null; remote.classList.remove('dragging'); saveRemote(); };
+  $('#rResize').addEventListener('pointerup', rend); $('#rResize').addEventListener('pointercancel', rend);
+})();
+$('#miniBtn').onclick = () => { const m = !remote.classList.contains('mini'); remote.classList.toggle('mini', m); LS.set('mini', m); clampRemote(remote.offsetLeft, remote.offsetTop); };
+$('#numBtn').onclick = () => { LS.set('numpad', !LS.get('numpad', false)); buildRemote(); fitRemote(); clampRemote(remote.offsetLeft, remote.offsetTop); };
+$('#editBtn').onclick = () => { editing = !editing; remote.classList.toggle('editing', editing); $('#editBtn').classList.toggle('on', editing); toast(editing ? 'Edit mode: tap any key to learn, test or clear it' : 'Keys saved'); };
+$('#remoteBtn').onclick = () => { const h = !remote.classList.contains('hidden'); remote.classList.toggle('hidden', h); $('#remoteBtn').classList.toggle('on', !h); LS.set('remoteHidden', h); };
+addEventListener('resize', () => { if (!$('#watch').classList.contains('hidden')) placeRemote(); });
+
+/* key editor: learn / test / clear */
+function sheet(html) {
+  const s = document.createElement('div'); s.className = 'scrim';
+  s.innerHTML = `<div class="sheet glass"><div class="sheen"></div>${html}</div>`;
+  s.addEventListener('pointerdown', e => { if (e.target === s) s.remove(); });
+  document.body.appendChild(s); return s;
+}
+const closeBtn = '<button class="icon-btn" data-close><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+function openKeyEditor(id) {
+  const s = sheet(`
+    <div class="hd"><div><h2>${LABELS[id]}</h2><div class="sub">Current: <span id="kCur"></span></div></div>${closeBtn}</div>
+    <label class="f">Android key</label>
+    <select id="kSel">${COMMON.map(k => `<option>${k}</option>`).join('')}<option value="">— none —</option></select>
+    <label class="f">Or type a key code</label>
+    <input type="text" id="kTxt" placeholder="KEYCODE_… or a number" autocapitalize="characters">
+    <div class="note" id="kNote">Learn: tap Learn, then press the same button on the TV box's own remote.</div>
+    <div class="btnrow" style="margin-top:10px">
+      <button class="btn" id="kLearn">Learn</button><button class="btn" id="kTest">Test</button><button class="btn danger" id="kClear">Clear</button>
+    </div>
+    <div class="btnrow" style="margin-top:8px"><button class="btn" id="kReset">Default</button><button class="btn primary" id="kSave">Save</button></div>`);
+  const sel = $('#kSel', s), txt = $('#kTxt', s);
+  const val = () => normKey(txt.value) || sel.value;
+  const show = k => { $('#kCur', s).textContent = k || 'none'; if (COMMON.includes(k)) { sel.value = k; txt.value = ''; } else { txt.value = k || ''; if (!k) sel.value = ''; } };
+  show(keymap[id]);
+  s.querySelector('[data-close]').onclick = () => s.remove();
+  $('#kTest', s).onclick = async () => { const k = val(); if (!k) return; const r = await ctlSend({ type: 'key', key: k }); $('#kNote', s).textContent = r.ok ? `Sent ${k} (${r.ms} ms on the box). Did the TV react?` : 'Failed: ' + r.err; };
+  $('#kClear', s).onclick = () => show('');
+  $('#kReset', s).onclick = () => show(DEFAULT_KEYS[id]);
+  $('#kLearn', s).onclick = async () => {
+    $('#kNote', s).textContent = 'Listening… press the button on the TV box\'s remote now (10 s).';
+    const r = await ctlSend({ type: 'learn' });
+    if (r.ok) { show(r.key); $('#kNote', s).textContent = `Learned ${r.key} (from ${r.raw}). Tap Save.`; vib(30); }
+    else $('#kNote', s).textContent = r.err || 'Nothing heard.';
+  };
+  $('#kSave', s).onclick = () => {
+    const k = val();
+    keymap[id] = k; const saved = LS.get('keymap', {}); saved[id] = k; LS.set('keymap', saved);
+    s.remove(); buildRemote(); toast(`${LABELS[id]} → ${k || 'none'}`);
+  };
+}
+function normKey(v) { v = (v || '').trim().toUpperCase(); if (!v) return ''; if (/^\d{1,3}$/.test(v)) return v; if (!v.startsWith('KEYCODE_')) v = 'KEYCODE_' + v; return /^KEYCODE_[A-Z0-9_]+$/.test(v) ? v : ''; }
+
+/* keyboard (Windows / tablets with keyboards) */
+const KB = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok', Backspace: 'back', Escape: 'back',
+  h: 'home', m: 'menu', '+': 'volup', '=': 'volup', '-': 'voldn', ' ': 'play', PageUp: 'chup', PageDown: 'chdn', g: 'guide', i: 'info',
+  ...Object.fromEntries([...Array(10)].map((_, i) => [String(i), 'n' + i])) };
+addEventListener('keydown', e => {
+  if ($('#watch').classList.contains('hidden') || document.querySelector('.scrim') || e.target.closest('input,select')) return;
+  if (e.key === 'f' || e.key === 'F') { toggleFs(); return; }
+  if (e.key === 's' || e.key === 'S') { toggleSound(); return; }
+  if (e.key === 'r' || e.key === 'R') { $('#remoteBtn').click(); return; }
+  const id = KB[e.key]; if (!id) return;
+  e.preventDefault();
+  const el = $(`#rBody [data-k="${id}"]`);
+  if (!e.repeat || REPEAT.has(id)) press(id, 'press', el);
+});
+
+/* ---------------- top bar: idle hide, full screen, back ---------------- */
+let idleT = 0;
+function wake() { $('#watch').classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => $('#watch').classList.add('idle'), 3500); }
+['pointermove', 'pointerdown', 'keydown'].forEach(ev => addEventListener(ev, wake, { passive: true }));
+function toggleFs() {
+  const d = document;
+  if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+  else { const el = $('#watch'); (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {}); try { screen.orientation.lock('landscape').catch(() => {}); } catch {} }
+}
+$('#fsBtn').onclick = toggleFs;
+if (!document.documentElement.requestFullscreen && !document.documentElement.webkitRequestFullscreen) $('#fsBtn').classList.add('hidden');
+$('#backBtn').onclick = () => showConnect();
+
+/* ---------------- invite: code, QR, copy link ---------------- */
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
+$('#shareBtn').onclick = async () => {
+  const link = `${APP_URL}#c=${cur.dev.code}`;
+  const s = sheet(`
+    <div class="hd"><div><h2>Invite</h2><div class="sub">Anyone with this code can watch and use the remote.</div></div>${closeBtn}</div>
+    <div class="bigcode">${pretty(cur.dev.code)}</div>
+    <div class="qr" id="qr"></div>
+    <div class="btnrow"><button class="btn primary" id="copyLink">Copy link</button>${navigator.share ? '<button class="btn" id="natShare">Share…</button>' : ''}</div>
+    <div class="note">To stop sharing, make a new code on the Pi: <b>tvcast newcode</b></div>`);
+  s.querySelector('[data-close]').onclick = () => s.remove();
+  $('#copyLink', s).onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch { prompt('Copy this link', link); } };
+  $('#natShare', s)?.addEventListener('click', () => navigator.share({ title: 'TV Cast', text: 'Watch my TV — code ' + pretty(cur.dev.code), url: link }).catch(() => {}));
+  try {
+    if (!window.QRCode) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js');
+    new QRCode($('#qr', s), { text: link, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  } catch { $('#qr', s).textContent = 'QR unavailable offline'; }
+};
+
+/* ---------------- check connection ---------------- */
+$('#checkBtn').onclick = runChecks;
+async function runChecks() {
+  const s = sheet(`<div class="hd"><div><h2>Check connection</h2><div class="sub">Tests every link from this device to the TV box.</div></div>${closeBtn}</div><ul class="checks" id="ck"></ul>
+    <div class="btnrow" style="margin-top:12px"><button class="btn" id="ckAgain">Run again</button><button class="btn" id="ckFix">Reconnect</button></div>`);
+  s.querySelector('[data-close]').onclick = () => s.remove();
+  $('#ckAgain', s).onclick = () => { s.remove(); runChecks(); };
+  $('#ckFix', s).onclick = () => { s.remove(); reconnect(); };
+  const ul = $('#ck', s);
+  const step = (title) => { const li = document.createElement('li'); li.innerHTML = `<div class="st run"></div><div class="t"><b></b><span></span></div>`; $('b', li).textContent = title; ul.appendChild(li);
+    return (kind, detail) => { const st = $('.st', li); st.className = 'st ' + kind; st.textContent = kind === 'ok' ? '✓' : kind === 'warn' ? '!' : '✕'; $('span', li).textContent = detail || ''; }; };
+  const keys = cur.keys;
+  let done = step('This device is online');
+  done(navigator.onLine ? 'ok' : 'bad', navigator.onLine ? (navigator.connection?.effectiveType ? 'Network: ' + navigator.connection.effectiveType : '') : 'No internet connection.');
+  done = step('Find your Pi (encrypted lookup)');
+  let t0 = performance.now();
+  try { const info = await lookup(cur.dev.code, keys); done(info ? (info.url === cur.url ? 'ok' : 'warn') : 'bad', info ? `${Math.round(performance.now() - t0)} ms${info.url !== cur.url ? ' — address changed, tap Reconnect' : ''}` : 'Nothing published for this code. Is the Pi on and online?'); }
+  catch { done(cur.dev.override ? 'warn' : 'bad', "Lookup service unreachable (ntfy.sh). If you're already connected this doesn't matter."); }
+  done = step('Reach the Pi through the encrypted tunnel');
+  let st = null;
+  try { const p = await probe(cur.url, keys); st = p.status; done(p.ms < 400 ? 'ok' : 'warn', `${p.ms} ms round trip${p.ms >= 400 ? ' — slow connection' : ''}`); }
+  catch (e) { done('bad', e.auth ? 'Code not accepted.' : 'Not answering: ' + e.message); }
+  if (st) {
+    done = step('Capture card');
+    const c = st.capture;
+    done(c.ok ? 'ok' : 'bad', c.ok ? `${c.device} · ${c.size} @ ${c.fps} fps (${c.format}) · ${c.quality}` : c.error);
+    done = step('Sound from the TV box');
+    done(c.audio && c.audio !== 'none' ? 'ok' : 'warn', c.audio && c.audio !== 'none' ? c.audio + (c.av_offset_ms ? ` · lip-sync ${c.av_offset_ms} ms` : '') : 'No audio input found on the capture card.');
+    done = step('TV box control (Wi-Fi)');
+    done(st.box.state === 'ready' ? 'ok' : 'bad', st.box.state === 'ready' ? st.box.target : `${st.box.state}: ${st.box.detail}`);
+  }
+  done = step('Picture and sound arriving');
+  const age = performance.now() - lastFrame;
+  if (lastFrame && age < 3000) {
+    let detail = mode === 'rtc' ? 'Direct connection (lowest delay)' : 'Encrypted relay (works on any network, ~1 s delay)';
+    if (mode === 'rtc' && player?.pc) { try { const r = await player.pc.getStats(); r.forEach(x => { if (x.type === 'inbound-rtp' && x.kind === 'video') detail += ` · ${x.framesPerSecond || fps} fps · ${x.packetsLost || 0} lost`; }); } catch {} }
+    else detail += ` · ${fps} fps`;
+    done(fps >= 20 ? 'ok' : 'warn', detail + (fps < 20 ? ' — try a lower quality in Settings' : ''));
+  } else done('bad', 'No picture right now. Tap Reconnect.');
+  done = step('Remote response time');
+  t0 = performance.now(); const r = await ping();
+  const ms = Math.round(performance.now() - t0);
+  done(r.type === 'pong' ? (ms < 300 ? 'ok' : 'warn') : 'bad', r.type === 'pong' ? `${ms} ms to the Pi${keyLat ? `, last key ${keyLat} ms end to end` : ''}` : 'Control channel not connected.');
+}
+
+/* ---------------- settings ---------------- */
+$('#setBtn').onclick = async () => {
+  let st = cur.status; try { st = (await probe(cur.url, cur.keys)).status; cur.status = st; } catch {}
+  const c = st.capture || {};
+  const s = sheet(`
+    <div class="hd"><div><h2>Settings</h2><div class="sub">${st.name} · Pi software ${st.version}</div></div>${closeBtn}</div>
+    <label class="f">Picture quality</label>
+    <select id="sQ"><option value="480p30">480p — saves mobile data</option><option value="720p30">720p 30 fps (recommended)</option><option value="720p60">720p 60 fps</option><option value="1080p30">1080p 30 fps</option></select>
+    <label class="f">Lip-sync: <span id="sOv"></span></label>
+    <input type="range" id="sO" min="-500" max="500" step="20">
+    <div class="note">Drag right if the sound is ahead of the picture, left if it's behind.</div>
+    <label class="f">Name</label><input type="text" id="sN" maxlength="40">
+    <div class="btnrow" style="margin-top:14px"><button class="btn primary" id="sApply">Apply</button><button class="btn" id="sRestart">Restart stream</button></div>
+    <label class="f">Advanced</label>
+    <input type="url" id="sUrl" placeholder="Custom server address (leave empty)">
+    <div class="btnrow" style="margin-top:12px"><button class="btn" id="sReset">Reset remote layout</button><button class="btn danger" id="sForget">Forget this TV</button></div>`);
+  s.querySelector('[data-close]').onclick = () => s.remove();
+  $('#sQ', s).value = c.quality || '720p30'; $('#sO', s).value = c.av_offset_ms || 0; $('#sN', s).value = st.name || '';
+  $('#sUrl', s).value = cur.dev.override || '';
+  const ov = () => { const v = +$('#sO', s).value; $('#sOv', s).textContent = v === 0 ? 'in sync' : v > 0 ? `sound delayed ${v} ms` : `picture delayed ${-v} ms`; };
+  ov(); $('#sO', s).oninput = ov;
+  const post = async body => {
+    const r = await fetchT(`${cur.url}/api/settings?t=${cur.keys.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 15000);
+    if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
+  };
+  $('#sApply', s).onclick = async () => {
+    try {
+      const o = $('#sUrl', s).value.trim().replace(/\/$/, ''); cur.dev.override = o; saveDevice(cur.dev);
+      const st2 = await post({ quality: $('#sQ', s).value, av_offset_ms: +$('#sO', s).value, name: $('#sN', s).value.trim() });
+      cur.status = st2; cur.dev.name = st2.name; saveDevice(cur.dev); $('#devName').textContent = st2.name;
+      s.remove(); toast('Saved — the picture restarts in a few seconds'); setTimeout(reconnect, 2500);
+    } catch (e) { toast('Could not save: ' + e.message, 'bad'); }
+  };
+  $('#sRestart', s).onclick = async () => { try { await post({ restart: true }); s.remove(); toast('Restarting stream…'); setTimeout(reconnect, 2500); } catch (e) { toast(e.message, 'bad'); } };
+  $('#sReset', s).onclick = () => { localStorage.removeItem('tvcast.remote.land'); localStorage.removeItem('tvcast.remote.port'); localStorage.removeItem('tvcast.keymap'); keymap = { ...DEFAULT_KEYS }; buildRemote(); placeRemote(); toast('Remote reset'); };
+  $('#sForget', s).onclick = () => { if (confirm('Forget this TV on this device?')) { forgetDevice(cur.dev.code); s.remove(); showConnect(); } };
+};
+
+/* ---------------- setup + install help ---------------- */
+$('#setupLink').onclick = () => {
+  const s = sheet(`
+    <div class="hd"><h2>Set up a new Pi</h2>${closeBtn}</div>
+    <ol class="steps">
+      <li>Flash <b>Raspberry Pi OS Lite (64-bit)</b> with Raspberry Pi Imager. Set hostname <b>tvcast</b>, a user, Wi-Fi, and enable SSH.</li>
+      <li>Wire it: TV box HDMI → capture card IN, capture card OUT → TV, capture card USB → Pi's blue port. Ethernet if you can.</li>
+      <li>On the TV box turn on <b>Developer options → USB debugging</b> (and network debugging if listed).</li>
+      <li>On your computer run <b>ssh YOURUSER@tvcast.local</b>, then paste:</li>
+    </ol>
+    <pre class="cmd">curl -fsSL ${APP_URL}pi/install.sh | bash -s -- ${APP_URL}</pre>
+    <button class="btn block" id="cpCmd">Copy command</button>
+    <div class="note">The installer finds your TV box, sets everything to start on boot, and shows your code and QR.</div>`);
+  s.querySelector('[data-close]').onclick = () => s.remove();
+  $('#cpCmd', s).onclick = () => navigator.clipboard.writeText(`curl -fsSL ${APP_URL}pi/install.sh | bash -s -- ${APP_URL}`).then(() => toast('Copied'));
+};
+let installEvt = null;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
+$('#installLink').onclick = async () => {
+  if (installEvt) { installEvt.prompt(); installEvt = null; return; }
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const s = sheet(`<div class="hd"><h2>Install TV Cast</h2>${closeBtn}</div>
+    ${ios ? '<ol class="steps"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button.</li><li>Choose <b>Add to Home Screen</b>.</li></ol>'
+          : '<ol class="steps"><li>Open this page in <b>Edge</b> or <b>Chrome</b>.</li><li>Click the install icon in the address bar, or <b>⋯ → Apps → Install</b>.</li></ol>'}
+    <div class="note">It opens full screen with its own icon. Already installed? You're in it.</div>`);
+  s.querySelector('[data-close]').onclick = () => s.remove();
+};
+if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) $('#installLink').classList.add('hidden');
+
+/* ---------------- start ---------------- */
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+buildRemote();
+const origShowWatch = () => { placeRemote(); remote.classList.toggle('hidden', LS.get('remoteHidden', false)); $('#remoteBtn').classList.toggle('on', !LS.get('remoteHidden', false)); };
+new MutationObserver(() => { if (!$('#watch').classList.contains('hidden')) requestAnimationFrame(origShowWatch); }).observe($('#watch'), { attributes: true, attributeFilter: ['class'] });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && cur && performance.now() - lastFrame > 3000) setTimeout(() => { if (performance.now() - lastFrame > 3000) reconnect(); }, 2500); });
+
+(function boot() {
+  const m = location.hash.match(/c=([0-9A-Za-z-]{8,9})/);
+  const server = qs.get('server');                    // testing / own domain: ?server=https://…
+  if (m) { const code = normCode(m[1]); history.replaceState(null, '', location.pathname + location.search); connectWith(server ? { code, override: server } : { code }); return; }
+  const last = LS.get('last', null); const d = devices().find(x => x.code === last);
+  if (d) { connectWith(d); return; }
+  showConnect();
+})();
+</script>
+</body>
+</html>
