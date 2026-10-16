@@ -99,20 +99,29 @@ def main():
             return out
 
     class Service(dbus.service.Object):
-        def __init__(self, idx, uuid):
-            self.path, self.uuid, self.chars = f"{ROOT}/service{idx}", uuid, []
+        # Fixed start handle: the box's saved "send me key presses" setting is stored by handle,
+        # so keeping handles identical across restarts/reboots means it keeps working without re-pairing.
+        def __init__(self, idx, uuid, handle):
+            self.path, self.uuid, self.chars, self.handle = f"{ROOT}/service{idx}", uuid, [], handle
             super().__init__(bus, self.path)
 
         def get_path(self):
             return dbus.ObjectPath(self.path)
 
         def props(self):
-            return {SVC_I: {"UUID": self.uuid, "Primary": True,
+            return {SVC_I: {"UUID": self.uuid, "Primary": True, "Handle": dbus.UInt16(self.handle),
                             "Characteristics": dbus.Array([c.get_path() for c in self.chars], signature="o")}}
 
         @dbus.service.method(PROPS, in_signature="s", out_signature="a{sv}")
         def GetAll(self, iface):
             return self.props()[SVC_I]
+
+        @dbus.service.method(PROPS, in_signature="ssv")
+        def Set(self, iface, name, value):
+            if name == "Handle":
+                if int(value) != self.handle:
+                    log.warning("service %s got handle 0x%04x (wanted 0x%04x)", self.uuid, int(value), self.handle)
+                self.handle = int(value)
 
     class Chrc(dbus.service.Object):
         def __init__(self, svc, uuid, flags, value=b""):
@@ -136,6 +145,10 @@ def main():
         @dbus.service.method(CHR_I, in_signature="a{sv}", out_signature="ay")
         def ReadValue(self, options):
             return ay(self.value[int(options.get("offset", 0)):])
+
+        @dbus.service.method(PROPS, in_signature="ssv")
+        def Set(self, iface, name, value):
+            pass
 
         @dbus.service.method(CHR_I, in_signature="aya{sv}")
         def WriteValue(self, value, options):
@@ -183,6 +196,10 @@ def main():
         @dbus.service.method(DSC_I, in_signature="a{sv}", out_signature="ay")
         def ReadValue(self, options):
             return ay(self.value[int(options.get("offset", 0)):])
+
+        @dbus.service.method(PROPS, in_signature="ssv")
+        def Set(self, iface, name, value):
+            pass
 
     class Advertisement(dbus.service.Object):
         PATH = f"{ROOT}/advert0"
@@ -244,7 +261,7 @@ def main():
 
     # ---- build the HID device
     app = Application()
-    hid = Service(0, "1812")
+    hid = Service(0, "1812", 0x0100)
     Chrc(hid, "2a4a", ["read"], [0x11, 0x01, 0x00, 0x02])                 # HID Information
     Chrc(hid, "2a4b", ["encrypt-read"], REPORT_MAP)                        # Report Map (asks the box to pair)
     Chrc(hid, "2a4c", ["write-without-response"], [0])                    # HID Control Point
@@ -253,10 +270,10 @@ def main():
     Desc(kb, "2908", ["read"], [1, 1])
     cc = Chrc(hid, "2a4d", ["encrypt-read", "notify"], bytes(2))           # Input report 2: consumer keys
     Desc(cc, "2908", ["read"], [2, 1])
-    dis = Service(1, "180a")
+    dis = Service(1, "180a", 0x0140)
     Chrc(dis, "2a29", ["read"], b"TV Cast")                                # Manufacturer
     Chrc(dis, "2a50", ["read"], [0x02, 0x6B, 0x1D, 0x46, 0x02, 0x00, 0x01])  # PnP ID (USB, Linux Foundation)
-    bat = Service(2, "180f")
+    bat = Service(2, "180f", 0x0160)
     Chrc(bat, "2a19", ["read", "notify"], [100])                           # Battery 100%
     app.services = [hid, dis, bat]
     reports = {"kb": kb, "cc": cc}
