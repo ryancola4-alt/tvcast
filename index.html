@@ -268,6 +268,7 @@ ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 
     <button class="icon-btn hidden" id="checkBtn" title="Check connection"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>
     <button class="icon-btn hidden" id="shareBtn" title="Invite"><svg class="i" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button>
     <button class="icon-btn hidden" id="setBtn" title="Settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    <button class="icon-btn hidden" id="pipBtn" title="Picture in picture"><svg class="i" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><rect x="12" y="11.5" width="7" height="5" rx="1" fill="currentColor" stroke="none"/></svg></button>
     <button class="icon-btn" id="fsBtn" title="Full screen (F)"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     <button class="icon-btn" id="moreBtn" title="More" aria-haspopup="menu"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/></svg></button>
     <button class="icon-btn on hidden" id="remoteBtn" title="Remote (R)"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/><path d="M10 14h.01M14 14h.01M10 17h.01M14 17h.01"/></svg></button>
@@ -442,17 +443,20 @@ function showConnect(err = '') {
 /* ---------------- watching ---------------- */
 let cur = null;          // { dev, url, keys, status }
 let player = null, ctl = null, watchdogTID = 0, lastFrame = 0, frames = 0, fps = 0, mode = '';
-let PlayerClass = null, playerOrigin = '';
+let PlayerClass = null, playerOrigin = '', retryTID = 0;
 
 async function loadPlayer(url) {
   if (PlayerClass) return PlayerClass;
   const { VideoRTC } = await import(`${url}/player/video-rtc.js`);
   playerOrigin = url;
   PlayerClass = class TvPlayer extends VideoRTC {
-    constructor() { super(); this.mode = 'webrtc,mse'; this.media = 'video,audio'; }
+    constructor() { super(); this.mode = 'webrtc,mse'; this.media = 'video,audio'; this.background = true; this.visibilityCheck = false; }
     oninit() {
       super.oninit();
       this.video.controls = false; this.video.autoplay = true; this.video.muted = LS.get('muted', false);
+      this.video.setAttribute('autopictureinpicture', ''); this.video.autoPictureInPicture = true;   // float when you leave the app
+      this.video.addEventListener('webkitpresentationmodechanged', drawPip);
+      this.video.addEventListener('enterpictureinpicture', drawPip); this.video.addEventListener('leavepictureinpicture', drawPip);
       const tick = () => { lastFrame = performance.now(); frames++; this.video.requestVideoFrameCallback(tick); };
       if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) this.video.requestVideoFrameCallback(tick);
       else this.video.addEventListener('timeupdate', () => { lastFrame = performance.now(); frames += 6; });
@@ -464,7 +468,10 @@ async function loadPlayer(url) {
       const r = super.onopen();
       this.onmessage['tvcast'] = m => {
         if (m.type === 'mse') setMode('mse');
-        if (m.type === 'error') { console.warn('stream', m.value); if (!lastFrame) stageText('The Pi is up, but the picture isn\'t ready yet: ' + m.value); }
+        if (m.type === 'error') {
+          console.warn('stream', m.value);
+          if (!lastFrame) { stageText('Starting the picture…'); clearTimeout(retryTID); retryTID = setTimeout(() => { if (!lastFrame) reconnect(); }, 3000); }
+        }
       };
       return r;
     }
@@ -860,6 +867,24 @@ function setImmersive(on) {
 }
 function toggleFs() { setImmersive(!$('#watch').classList.contains('immersive')); }
 $('#fsBtn').onclick = toggleFs;
+// Picture in picture: keep watching in a small floating window while you use other apps.
+const pipSupported = () => ('webkitSupportsPresentationMode' in HTMLVideoElement.prototype) || document.pictureInPictureEnabled;
+function inPip() { const v = player?.video; return !!v && (v.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement === v); }
+function drawPip() { $('#pipBtn').classList.toggle('on', inPip()); }
+async function togglePip() {
+  const v = player?.video; if (!v || !lastFrame) { toast('Wait for the picture first'); return false; }
+  try {
+    if (v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture')) {
+      v.webkitSetPresentationMode(inPip() ? 'inline' : 'picture-in-picture');
+    } else if (document.pictureInPictureEnabled) {
+      inPip() ? await document.exitPictureInPicture() : await v.requestPictureInPicture();
+    } else { toast("This device can't do picture in picture"); return false; }
+    return true;
+  } catch (e) { toast("Picture in picture didn't start: " + (e.message || e)); return false; }
+}
+$('#pipBtn').onclick = togglePip;
+if (pipSupported()) $('#pipBtn').classList.remove('hidden');
+window.tvcastEnterPiP = () => { if (!inPip() && lastFrame && player?.video && !player.video.paused) togglePip(); };   // the iPhone app calls this when you leave it
 document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && $('#watch').classList.contains('immersive')) setImmersive(false); });
 // double-tap (or double-click) the picture: zoom to fill the screen / fit the whole picture
 let lastTap = 0;
@@ -1015,11 +1040,12 @@ $('#installLink').onclick = async () => {
     <div class="note">It opens full screen with its own icon. Already installed? You're in it.</div>`);
   s.querySelector('[data-close]').onclick = () => s.remove();
 };
-if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) $('#installLink').classList.add('hidden');
+if (matchMedia('(display-mode: standalone)').matches || navigator.standalone || /TVCastApp/.test(navigator.userAgent)) $('#installLink').classList.add('hidden');
 
 /* ---------------- start ---------------- */
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 buildRemote();
+drawSound();
 const origShowWatch = () => { placeRemote(); remote.classList.toggle('hidden', LS.get('remoteHidden', false)); $('#remoteBtn').classList.toggle('on', !LS.get('remoteHidden', false)); };
 new MutationObserver(() => { if (!$('#watch').classList.contains('hidden')) requestAnimationFrame(origShowWatch); }).observe($('#watch'), { attributes: true, attributeFilter: ['class'] });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && cur && performance.now() - lastFrame > 3000) setTimeout(() => { if (performance.now() - lastFrame > 3000) reconnect(); }, 2500); });

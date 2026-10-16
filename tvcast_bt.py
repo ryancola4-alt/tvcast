@@ -396,6 +396,42 @@ def main():
         allow_reuse_address = True
         daemon_threads = True
 
+    # ---- keep the box connected: if it drops (box slept, Pi restarted), the Pi calls it back
+    pending = set()
+
+    def reconnect():
+        if state["subscribed"]:
+            return True
+        try:
+            devs = devices()
+        except Exception:
+            return True
+        for d in devs:
+            if d["paired"] and not d["connected"] and d["path"] not in pending:
+                pending.add(d["path"])
+                log.info("reconnecting to %s", d["name"])
+
+                def done(path=d["path"], name=d["name"]):
+                    pending.discard(path); log.info("reconnected to %s", name)
+
+                def err(e, path=d["path"]):
+                    pending.discard(path)
+                    log.info("box not reachable yet (%s)", e.get_dbus_name() if hasattr(e, "get_dbus_name") else e)
+
+                dbus.Interface(bus.get_object(BUS, d["path"]), DEV_I).Connect(
+                    reply_handler=done, error_handler=err, timeout=20)
+        return True
+
+    def on_dev_change(iface, changed, invalidated, path=None):
+        if iface == DEV_I and "Connected" in changed:
+            log.info("box %s", "linked" if changed["Connected"] else "unlinked")
+            if not changed["Connected"]:
+                GLib.timeout_add_seconds(3, lambda: (reconnect(), False)[1])
+
+    bus.add_signal_receiver(on_dev_change, dbus_interface=PROPS, signal_name="PropertiesChanged",
+                            bus_name=BUS, path_keyword="path")
+    GLib.timeout_add_seconds(15, reconnect)
+
     srv = Server(("127.0.0.1", PORT), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     log.info("TV Cast Bluetooth remote ready on 127.0.0.1:%d", PORT)

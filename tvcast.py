@@ -526,6 +526,13 @@ class Service:
             "streams": {} if self.plan.get("error") else
                        {"tv": "exec:" + ffmpeg_cmd(self.plan, int(self.conf.get("av_offset_ms") or 0))},
         }
+        if not self.plan.get("error"):
+            # Always-on: the card is opened once and kept open, so the picture starts instantly and
+            # two viewers (or a quick reconnect) never fight over the card ("device busy").
+            cfg["preload"] = {"tv": ""}
+        if not self.plan.get("test") and self.plan.get("video"):
+            subprocess.run(["pkill", "-f", f"ffmpeg.*{re.escape(self.plan['video'])}( |$)"], capture_output=True)
+            await asyncio.sleep(0.5)
         path = CONF_DIR / "go2rtc.yaml"
         path.write_text(json.dumps(cfg, indent=1))     # JSON is valid YAML
         self.go2rtc = await asyncio.create_subprocess_exec(self.go2rtc_bin(), "-config", str(path),
