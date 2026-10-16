@@ -64,7 +64,7 @@ def plan(key, mode="press"):
 
 
 # ---------------------------------------------------------------- BlueZ GATT peripheral
-def main():
+def main_le():
     import dbus, dbus.service, dbus.mainloop.glib
     from gi.repository import GLib
 
@@ -476,6 +476,342 @@ def main():
         sys.exit(1)
 
 
+# ================================================================ classic Bluetooth keyboard (default)
+# A classic (BR/EDR) HID keyboard has no per-connection "subscribe" step, so it keeps working
+# after the Pi or the helper restarts: the Pi simply reconnects to the box like any keyboard does.
+SDP_RECORD = """<?xml version="1.0" encoding="UTF-8" ?>
+<record>
+  <attribute id="0x0001"><sequence><uuid value="0x1124" /></sequence></attribute>
+  <attribute id="0x0004"><sequence>
+    <sequence><uuid value="0x0100" /><uint16 value="0x0011" /></sequence>
+    <sequence><uuid value="0x0011" /></sequence>
+  </sequence></attribute>
+  <attribute id="0x0005"><sequence><uuid value="0x1002" /></sequence></attribute>
+  <attribute id="0x0006"><sequence><uint16 value="0x656e" /><uint16 value="0x006a" /><uint16 value="0x0100" /></sequence></attribute>
+  <attribute id="0x0009"><sequence><sequence><uuid value="0x1124" /><uint16 value="0x0101" /></sequence></sequence></attribute>
+  <attribute id="0x000d"><sequence><sequence>
+    <sequence><uuid value="0x0100" /><uint16 value="0x0013" /></sequence>
+    <sequence><uuid value="0x0011" /></sequence>
+  </sequence></sequence></attribute>
+  <attribute id="0x0100"><text value="%(name)s" /></attribute>
+  <attribute id="0x0101"><text value="Remote keyboard" /></attribute>
+  <attribute id="0x0102"><text value="TV Cast" /></attribute>
+  <attribute id="0x0200"><uint16 value="0x0100" /></attribute>
+  <attribute id="0x0201"><uint16 value="0x0111" /></attribute>
+  <attribute id="0x0202"><uint8 value="0x40" /></attribute>
+  <attribute id="0x0203"><uint8 value="0x00" /></attribute>
+  <attribute id="0x0204"><boolean value="true" /></attribute>
+  <attribute id="0x0205"><boolean value="true" /></attribute>
+  <attribute id="0x0206"><sequence><sequence><uint8 value="0x22" /><text encoding="hex" value="%(map)s" /></sequence></sequence></attribute>
+  <attribute id="0x0207"><sequence><sequence><uint16 value="0x0409" /><uint16 value="0x0100" /></sequence></sequence></attribute>
+  <attribute id="0x020b"><uint16 value="0x0100" /></attribute>
+  <attribute id="0x020c"><uint16 value="0x0c80" /></attribute>
+  <attribute id="0x020d"><boolean value="false" /></attribute>
+  <attribute id="0x020e"><boolean value="false" /></attribute>
+  <attribute id="0x020f"><uint16 value="0x0640" /></attribute>
+  <attribute id="0x0210"><uint16 value="0x0320" /></attribute>
+</record>
+"""
+PSM_CTRL, PSM_INTR = 0x11, 0x13
+
+
+def hidp_reply(msg):
+    """Answer the box's HID control messages (HIDP). Returns bytes to send back, or None."""
+    if not msg:
+        return None
+    kind, param = msg[0] >> 4, msg[0] & 0x0F
+    if kind in (0x5, 0x7, 0x9):          # SET_REPORT / SET_PROTOCOL / SET_IDLE -> "OK"
+        return b"\x00"
+    if kind == 0x6:                      # GET_PROTOCOL -> report protocol
+        return b"\xA0\x01"
+    if kind == 0x8:                      # GET_IDLE
+        return b"\xA0\x00"
+    if kind == 0x4:                      # GET_REPORT -> current (empty) report
+        rid = msg[1] if len(msg) > 1 else 1
+        return b"\xA1" + bytes([rid]) + (bytes(8) if rid == 1 else bytes(2))
+    return None
+
+
+def frame(name, data):
+    """Interrupt-channel input report: DATA|Input, report id, payload."""
+    return b"\xA1" + (b"\x01" if name == "kb" else b"\x02") + bytes(data)
+
+
+def main_classic():
+    import socket
+    import dbus, dbus.service, dbus.mainloop.glib
+    from gi.repository import GLib
+
+    BUS, OM, PROPS = "org.bluez", "org.freedesktop.DBus.ObjectManager", "org.freedesktop.DBus.Properties"
+    ADP_I, DEV_I, AGENT_I = "org.bluez.Adapter1", "org.bluez.Device1", "org.bluez.Agent1"
+    ROOT = "/org/tvcast"
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    loop = GLib.MainLoop()
+    st = {"ctrl": None, "intr": None, "host": "", "error": "", "advertising": False, "busy": False}
+
+    # ---- adapter
+    objs = dbus.Interface(bus.get_object(BUS, "/"), OM).GetManagedObjects()
+    adapter_path = next((p for p, i in objs.items() if ADP_I in i), None)
+    if not adapter_path:
+        log.error("No Bluetooth adapter found"); sys.exit(1)
+    adapter = bus.get_object(BUS, adapter_path)
+    aprops = dbus.Interface(adapter, PROPS)
+    for k, v in (("Powered", True), ("Alias", NAME), ("Pairable", True), ("PairableTimeout", dbus.UInt32(0)),
+                 ("DiscoverableTimeout", dbus.UInt32(0)), ("Discoverable", True)):
+        try:
+            aprops.Set(ADP_I, k, v)
+        except Exception as e:
+            log.warning("adapter %s: %s", k, e)
+    st["advertising"] = True
+
+    # ---- pairing agent: no code to type; trust the box so it can reconnect by itself
+    class Agent(dbus.service.Object):
+        PATH = ROOT + "/agent"
+        def trust(self, device):
+            try:
+                dbus.Interface(bus.get_object(BUS, device), PROPS).Set(DEV_I, "Trusted", True)
+            except Exception as e:
+                log.warning("trust: %s", e)
+        @dbus.service.method(AGENT_I)
+        def Release(self): pass
+        @dbus.service.method(AGENT_I, in_signature="os")
+        def AuthorizeService(self, d, u): self.trust(d)
+        @dbus.service.method(AGENT_I, in_signature="o", out_signature="s")
+        def RequestPinCode(self, d): self.trust(d); return "0000"
+        @dbus.service.method(AGENT_I, in_signature="o", out_signature="u")
+        def RequestPasskey(self, d): self.trust(d); return dbus.UInt32(0)
+        @dbus.service.method(AGENT_I, in_signature="ouq")
+        def DisplayPasskey(self, d, p, e): log.info("passkey %06d", p)
+        @dbus.service.method(AGENT_I, in_signature="os")
+        def DisplayPinCode(self, d, p): log.info("pin %s", p)
+        @dbus.service.method(AGENT_I, in_signature="ou")
+        def RequestConfirmation(self, d, p): self.trust(d)
+        @dbus.service.method(AGENT_I, in_signature="o")
+        def RequestAuthorization(self, d): self.trust(d)
+        @dbus.service.method(AGENT_I)
+        def Cancel(self): pass
+
+    class Profile(dbus.service.Object):
+        PATH = ROOT + "/hid"
+        @dbus.service.method("org.bluez.Profile1")
+        def Release(self): pass
+        @dbus.service.method("org.bluez.Profile1", in_signature="oha{sv}")
+        def NewConnection(self, device, fd, props): pass
+        @dbus.service.method("org.bluez.Profile1", in_signature="o")
+        def RequestDisconnection(self, device): close_all("host asked")
+
+    agent, profile = Agent(bus, Agent.PATH), Profile(bus, Profile.PATH)
+    am = dbus.Interface(bus.get_object(BUS, "/org/bluez"), "org.bluez.AgentManager1")
+    try:
+        am.RegisterAgent(dbus.ObjectPath(Agent.PATH), "NoInputNoOutput"); am.RequestDefaultAgent(dbus.ObjectPath(Agent.PATH))
+    except Exception as e:
+        log.warning("agent: %s", e)
+    pm = dbus.Interface(bus.get_object(BUS, "/org/bluez"), "org.bluez.ProfileManager1")
+    try:
+        pm.RegisterProfile(dbus.ObjectPath(Profile.PATH), "00001124-0000-1000-8000-00805f9b34fb", {
+            "ServiceRecord": SDP_RECORD % {"name": NAME, "map": REPORT_MAP.hex()},
+            "Role": "server", "RequireAuthentication": True, "RequireAuthorization": False})
+    except Exception as e:
+        st["error"] = f"HID profile: {e}"; log.error(st["error"])
+
+    # ---- L2CAP channels (control 17, interrupt 19)
+    def listener(psm):
+        s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((socket.BDADDR_ANY, psm))
+        s.listen(1)
+        return s
+    try:
+        srv_ctrl, srv_intr = listener(PSM_CTRL), listener(PSM_INTR)
+    except OSError as e:
+        st["error"] = (f"can't open the keyboard channels ({e}). Bluetooth's own input plugin must be off: "
+                       "run bt-classic.sh again")
+        log.error(st["error"]); srv_ctrl = srv_intr = None
+
+    def close_all(why):
+        for k in ("intr", "ctrl"):
+            if st[k]:
+                try: st[k].close()
+                except OSError: pass
+                st[k] = None
+        if why:
+            log.info("box disconnected (%s)", why)
+
+    def watch(sock, name):
+        def on_data(fd, cond):
+            if cond & (GLib.IO_HUP | GLib.IO_ERR):
+                close_all(f"{name} closed"); return False
+            try:
+                data = sock.recv(64)
+            except OSError:
+                close_all(f"{name} error"); return False
+            if not data:
+                close_all(f"{name} closed"); return False
+            if name == "ctrl":
+                if data[0] == 0x15:          # HID_CONTROL virtual cable unplug
+                    close_all("unplugged"); return False
+                r = hidp_reply(data)
+                if r is not None:
+                    try: sock.send(r)
+                    except OSError: pass
+            return True
+        GLib.io_add_watch(sock.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, on_data)
+
+    def adopt(name, sock, addr):
+        if st[name]:
+            try: st[name].close()
+            except OSError: pass
+        st[name] = sock; st["host"] = addr
+        watch(sock, name)
+        if name == "intr":
+            log.info("box connected (%s) — remote ready", addr)
+
+    def on_accept(srv, name):
+        def cb(fd, cond):
+            try:
+                sock, (addr, _) = srv.accept()
+            except OSError as e:
+                log.warning("accept %s: %s", name, e); return True
+            adopt(name, sock, addr)
+            return True
+        return cb
+    if srv_ctrl:
+        GLib.io_add_watch(srv_ctrl.fileno(), GLib.IO_IN, on_accept(srv_ctrl, "ctrl"))
+        GLib.io_add_watch(srv_intr.fileno(), GLib.IO_IN, on_accept(srv_intr, "intr"))
+
+    # ---- reconnect: like any keyboard, the Pi calls the box back after restarts / sleep
+    def paired_hosts():
+        objs = dbus.Interface(bus.get_object(BUS, "/"), OM).GetManagedObjects()
+        out = []
+        for p, i in objs.items():
+            d = i.get(DEV_I)
+            if d and str(d.get("Adapter")) == adapter_path and d.get("Paired"):
+                out.append({"addr": str(d.get("Address")), "name": str(d.get("Alias", d.get("Address"))),
+                            "connected": bool(d.get("Connected")), "path": str(p)})
+        return out
+
+    attempt = {"n": 0}
+    def reconnect():
+        if st["intr"] or st["busy"] or not srv_ctrl:
+            return True
+        try:
+            hosts = paired_hosts()
+        except Exception:
+            return True
+        if not hosts:
+            return True
+        host = hosts[0]
+        st["busy"] = True
+        def work():
+            c = i = None
+            try:
+                c = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+                c.settimeout(8); c.connect((host["addr"], PSM_CTRL))
+                i = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+                i.settimeout(8); i.connect((host["addr"], PSM_INTR))
+                c.settimeout(None); i.settimeout(None)
+                def done():
+                    if st["intr"]:          # the box connected to us meanwhile
+                        c.close(); i.close()
+                    else:
+                        adopt("ctrl", c, host["addr"]); adopt("intr", i, host["addr"])
+                    st["busy"] = False; attempt["n"] = 0
+                    return False
+                GLib.idle_add(done)
+            except OSError as e:
+                for s_ in (c, i):
+                    if s_:
+                        try: s_.close()
+                        except OSError: pass
+                attempt["n"] += 1
+                if attempt["n"] in (1, 5) or attempt["n"] % 30 == 0:
+                    log.info("box %s not answering yet (%s)", host["name"], e.strerror or e)
+                GLib.idle_add(lambda: (st.__setitem__("busy", False), False)[1])
+        threading.Thread(target=work, daemon=True).start()
+        return True
+    GLib.timeout_add_seconds(5, reconnect)
+    GLib.timeout_add_seconds(1, lambda: (reconnect(), False)[1])
+
+    # ---- key queue (GLib thread)
+    queue, busy = deque(), [False]
+    def pump():
+        if busy[0] or not queue:
+            return False
+        busy[0] = True
+        item = queue.popleft()
+        p = plan(item["key"], item.get("mode", "press"))
+        def finish(res, gap=12):
+            item["res"] = res; item["ev"].set()
+            GLib.timeout_add(gap, lambda: (busy.__setitem__(0, False), pump(), False)[2])
+        if not p:
+            finish({"ok": False, "err": f"{item['key']} isn't available over Bluetooth"}, 0); return False
+        if not st["intr"]:
+            finish({"ok": False, "err": "The TV box isn't connected to the Pi's Bluetooth"}, 0); return False
+        name, down, up, hold = p
+        t0 = time.monotonic()
+        try:
+            st["intr"].send(frame(name, down))
+        except OSError as e:
+            close_all(f"send failed: {e}")
+            finish({"ok": False, "err": "Lost the Bluetooth link — reconnecting"}, 0); return False
+        def release():
+            try:
+                if st["intr"]: st["intr"].send(frame(name, up))
+            except OSError:
+                close_all("send failed")
+            finish({"ok": True, "ms": int((time.monotonic() - t0) * 1000)})
+            return False
+        GLib.timeout_add(int(hold * 1000), release)
+        return False
+
+    def forget():
+        close_all("forgetting")
+        for h in paired_hosts():
+            try: dbus.Interface(adapter, ADP_I).RemoveDevice(h["path"])
+            except Exception as e: log.warning("remove: %s", e)
+        return False
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            for raw in self.rfile:
+                try:
+                    msg = json.loads(raw)
+                except ValueError:
+                    continue
+                cmd = msg.get("cmd")
+                if cmd == "key":
+                    item = {"key": str(msg.get("key", "")), "mode": msg.get("mode", "press"), "ev": threading.Event()}
+                    GLib.idle_add(lambda it=item: (queue.append(it), pump(), False)[2])
+                    res = item["res"] if item["ev"].wait(5) else {"ok": False, "err": "timeout"}
+                elif cmd == "status":
+                    try:
+                        hosts = paired_hosts()
+                    except Exception:
+                        hosts = []
+                    res = {"name": NAME, "mode": "classic", "subscribed": bool(st["intr"]),
+                           "advertising": st["advertising"], "registered": not st["error"], "error": st["error"],
+                           "connected": [h["name"] for h in hosts if h["connected"]],
+                           "paired": [h["name"] for h in hosts]}
+                elif cmd == "forget":
+                    GLib.idle_add(forget); res = {"ok": True}
+                else:
+                    res = {"ok": False, "err": "unknown command"}
+                self.wfile.write((json.dumps(res) + "\n").encode()); self.wfile.flush()
+
+    class Server(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+    srv = Server(("127.0.0.1", PORT), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    log.info("TV Cast Bluetooth remote (classic keyboard) ready on 127.0.0.1:%d", PORT)
+    try:
+        loop.run()
+    finally:
+        close_all("")
+        srv.shutdown()
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    main()
+    (main_le if os.environ.get("TVCAST_BT_MODE", "classic") == "le" else main_classic)()
