@@ -281,7 +281,7 @@ def main():
     adapter = bus.get_object(BUS, adapter_path)
     aprops = dbus.Interface(adapter, PROPS)
     for k, v in (("Powered", True), ("Alias", NAME), ("Pairable", True), ("PairableTimeout", dbus.UInt32(0)),
-                 ("DiscoverableTimeout", dbus.UInt32(0)), ("Discoverable", True)):
+                 ("Discoverable", False)):   # stay hidden on classic Bluetooth; the box must find us over LE (HID needs LE)
         try:
             aprops.Set(ADP_I, k, v)
         except Exception as e:

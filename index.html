@@ -9,8 +9,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="TV Cast">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/icon-192.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>TV Cast</title>
 <style>
 :root{
@@ -96,10 +96,17 @@ tv-player video{object-fit:contain;background:#000}
 #watch.idle .pill{opacity:0}
 @media (orientation:portrait){#watch.idle .pill{opacity:1}}
 @media (orientation:landscape){.pill{bottom:calc(14px + var(--safe-b))}}
-@media (max-width:520px) and (orientation:portrait){#fsBtn{display:none}.icon-btn{width:38px;height:38px;border-radius:12px}.topbar{gap:6px}}
+@media (max-width:520px) and (orientation:portrait){.icon-btn{width:36px;height:36px;border-radius:11px}.icon-btn svg.i{width:20px;height:20px}.topbar{gap:5px}#devName{font-size:14px}}
 .pill i{width:7px;height:7px;border-radius:50%;background:var(--dim)}
 .pill.ok i{background:var(--ok);box-shadow:0 0 8px var(--ok)} .pill.warn i{background:var(--warn);box-shadow:0 0 8px var(--warn)} .pill.bad i{background:var(--bad)}
 #watch.idle .topbar{opacity:0;pointer-events:none}
+/* full-screen mode that works on iPhone too: video fills the screen, bars auto-hide in any orientation */
+#watch.immersive #stage{top:0!important;bottom:0!important;aspect-ratio:auto!important;width:100%!important;height:100%}
+#watch.immersive.idle .topbar,#watch.immersive.idle .pill{opacity:0!important;pointer-events:none!important}
+#watch.immersive .topbar{background:linear-gradient(rgba(0,0,0,.75),transparent)}
+#watch.zoom tv-player video{object-fit:cover}
+#fsBtn.on{background:rgba(122,162,255,.25);border-color:rgba(122,162,255,.5)}
+.hint{position:absolute;z-index:7;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 16px;border-radius:14px;font-size:14px;pointer-events:none;animation:fade .2s;transition:opacity .4s}
 @media (orientation:portrait){#watch.idle .topbar{opacity:1;pointer-events:auto}}
 .center-msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--mute);pointer-events:none;padding:20px}
 .spinner{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:var(--a1);animation:spin 1s linear infinite;margin:0 auto 12px}
@@ -666,7 +673,7 @@ function placeRemote() {
   let x, y;
   if (s) { x = s.x * innerWidth - w / 2; y = s.y * innerHeight - h / 2; }
   else if (innerWidth > innerHeight) { x = innerWidth - w - 18; y = Math.max(topReserve() + 8, (innerHeight - h) / 2); }
-  else { x = (innerWidth - w) / 2; const top = 56 + innerWidth * 9 / 16 + 14; y = Math.max(top, innerHeight - h - 18); }
+  else { x = (innerWidth - w) / 2; const top = $('#watch').classList.contains('immersive') ? 70 : 56 + innerWidth * 9 / 16 + 14; y = Math.max(top, innerHeight - h - 18); }
   clampRemote(x, y);
   remote.classList.toggle('mini', LS.get('mini', false));
 }
@@ -776,13 +783,38 @@ addEventListener('keydown', e => {
 let idleT = 0;
 function wake() { $('#watch').classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => $('#watch').classList.add('idle'), 3500); }
 ['pointermove', 'pointerdown', 'keydown'].forEach(ev => addEventListener(ev, wake, { passive: true }));
-function toggleFs() {
-  const d = document;
-  if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
-  else { const el = $('#watch'); (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {}); try { screen.orientation.lock('landscape').catch(() => {}); } catch {} }
+// iPhone Safari can't make a page truly full screen, so "full screen" = immersive mode:
+// the video fills the whole screen (any orientation), the bars hide themselves, and the
+// browser's own full screen is used on top of that wherever it exists (Windows, Android, iPad).
+function hint(text) {
+  document.querySelectorAll('.hint').forEach(h => h.remove());
+  const h = document.createElement('div'); h.className = 'hint glass'; h.textContent = text;
+  $('#watch').appendChild(h); setTimeout(() => { h.style.opacity = 0; setTimeout(() => h.remove(), 400); }, 1600);
 }
+function setImmersive(on) {
+  const w = $('#watch'); w.classList.toggle('immersive', on); $('#fsBtn').classList.toggle('on', on); LS.set('immersive', on);
+  const d = document, el = d.documentElement;
+  if (on && (el.requestFullscreen || el.webkitRequestFullscreen) && !(d.fullscreenElement || d.webkitFullscreenElement)) {
+    try { (el.requestFullscreen || el.webkitRequestFullscreen).call(el)?.catch?.(() => {}); } catch {}
+    try { screen.orientation.lock('landscape').catch(() => {}); } catch {}
+  } else if (!on && (d.fullscreenElement || d.webkitFullscreenElement)) {
+    try { (d.exitFullscreen || d.webkitExitFullscreen).call(d); } catch {}
+  }
+  if (on) { wake(); hint(innerWidth < innerHeight ? 'Turn your phone sideways · double-tap to fill' : 'Double-tap the picture to fill the screen'); }
+  placeRemote();
+}
+function toggleFs() { setImmersive(!$('#watch').classList.contains('immersive')); }
 $('#fsBtn').onclick = toggleFs;
-if (!document.documentElement.requestFullscreen && !document.documentElement.webkitRequestFullscreen) $('#fsBtn').classList.add('hidden');
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && $('#watch').classList.contains('immersive')) setImmersive(false); });
+// double-tap (or double-click) the picture: zoom to fill the screen / fit the whole picture
+let lastTap = 0;
+$('#stage').addEventListener('pointerup', e => {
+  const now = performance.now();
+  if (now - lastTap < 320) { const z = !$('#watch').classList.contains('zoom'); $('#watch').classList.toggle('zoom', z); LS.set('zoom', z); hint(z ? 'Zoom: fill screen' : 'Zoom: whole picture'); lastTap = 0; }
+  else lastTap = now;
+});
+if (LS.get('zoom', false)) $('#watch').classList.add('zoom');
+if (LS.get('immersive', false)) $('#watch').classList.add('immersive'), $('#fsBtn').classList.add('on');
 $('#backBtn').onclick = () => showConnect();
 
 /* ---------------- invite: code, QR, copy link ---------------- */

@@ -22,6 +22,9 @@ fetch tvcast_bt.py "$BIN/tvcast_bt.py"
 chmod +x "$BIN/tvcast.py" "$BIN/tvcast_bt.py"
 sudo ln -sf "$BIN/tvcast.py" /usr/local/bin/tvcast
 sudo rfkill unblock bluetooth 2>/dev/null || true
+# LE-only: otherwise the box can pair over classic Bluetooth, which has no remote (HID) service.
+# Private (random) address: a box that ever saw the Pi over classic Bluetooth would otherwise keep trying that way.
+sudo sed -i '/^#\?ControllerMode/d; /^#\?Privacy *=/d; /^\[General\]/a ControllerMode = le\nPrivacy = device' /etc/bluetooth/main.conf
 
 sudo tee /etc/systemd/system/tvcast-bt.service >/dev/null <<EOF
 [Unit]
