@@ -15,7 +15,7 @@
 <style>
 :root{
   --bg:#06070b; --ink:#eef1f8; --mute:#8a92a6; --dim:#5b6276;
-  --a1:#7aa2ff; --a2:#b48cff; --a3:#5ee0ff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171;
+  --a1:#8fb4ff; --a2:#8fb4ff; --a3:#8fb4ff; --ok:#4ade80; --warn:#fbbf24; --bad:#f87171;
   --glass:rgba(16,18,28,.62); --glass-hi:rgba(255,255,255,.14); --line:rgba(255,255,255,.12);
   --r:20px; --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
   --safe-l:env(safe-area-inset-left); --safe-r:env(safe-area-inset-right);
@@ -196,6 +196,38 @@ pre.cmd{white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,.4);bord
 .toast{position:fixed;z-index:40;left:50%;bottom:calc(24px + var(--safe-b));transform:translateX(-50%);padding:10px 16px;border-radius:14px;font-size:14px;max-width:90vw;animation:up .2s}
 .note{font-size:13px;color:var(--mute);margin:8px 0}
 ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 0}
+
+/* ===== clean pass ===== */
+.btn.primary{background:var(--a1);box-shadow:none}
+.logo{background:var(--a1);box-shadow:none}
+.aurora{animation:none;opacity:.45}
+.sheen{display:none}
+.icon-btn{background:rgba(255,255,255,.06);border-color:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
+.icon-btn.on{background:rgba(143,180,255,.18);border-color:transparent;color:#cfe0ff}
+.topbar{background:linear-gradient(rgba(0,0,0,.55),transparent)}
+.menu{position:absolute;z-index:30;background:rgba(18,20,26,.94)!important;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);right:calc(10px + var(--safe-r));top:calc(56px + var(--safe-t));min-width:220px;padding:6px;border-radius:16px;animation:fade .15s}
+.menu button{display:flex;align-items:center;gap:12px;width:100%;padding:12px 12px;border:0;background:none;border-radius:10px;font-size:15px;text-align:left;cursor:pointer}
+.menu button:active,.menu button:hover{background:rgba(255,255,255,.08)}
+.menu svg.i{width:20px;height:20px;color:var(--mute)}
+/* keys: flat, quiet, one accent on press */
+#remote .key{background:rgba(255,255,255,.07);border:0;box-shadow:none;color:#e4e8f1}
+#remote .key.pressed,#remote .dpad .seg.pressed{transform:scale(.95);background:rgba(143,180,255,.28);box-shadow:none;color:#fff}
+#remote .key.power{color:#ff8f9c}
+#remote .dpad{background:rgba(255,255,255,.06);border:0;box-shadow:none}
+#remote .dpad::after{display:none}
+#remote .seg.ok{background:rgba(255,255,255,.12);box-shadow:none;animation:none;color:#fff}
+#remote .seg.ok.pressed{background:rgba(143,180,255,.4)}
+#remote .rocker{background:rgba(255,255,255,.07);border:0;box-shadow:none}
+#remote .rocker .key{background:none}
+#remote .lat,#editBtn,#numBtn{display:none}
+.toast{color:var(--ink)}
+/* portrait phone: video on top, status line under it, remote docked below (no floating card) */
+#remote:not(.docked){background:rgba(16,18,24,.93);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
+#remote.docked{background:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;padding:0}
+#remote.docked::before,#remote.docked .r-head,#remote.docked .resize{display:none}
+@media (orientation:portrait){
+  #watch:not(.immersive) .pill{top:calc(100% + 12px);bottom:auto;left:16px;background:none;border:0;backdrop-filter:none;-webkit-backdrop-filter:none;padding:0;color:var(--mute)}
+}
 </style>
 </head>
 <body>
@@ -233,13 +265,22 @@ ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 
     <button class="icon-btn" id="backBtn" title="Devices"><svg class="i" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
     <div class="title"><b id="devName">TV Box</b></div>
     <button class="icon-btn" id="muteBtn" title="Sound (S)"></button>
-    <button class="icon-btn" id="checkBtn" title="Check connection"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>
-    <button class="icon-btn" id="shareBtn" title="Invite"><svg class="i" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button>
-    <button class="icon-btn" id="setBtn" title="Settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    <button class="icon-btn hidden" id="checkBtn" title="Check connection"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>
+    <button class="icon-btn hidden" id="shareBtn" title="Invite"><svg class="i" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></button>
+    <button class="icon-btn hidden" id="setBtn" title="Settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     <button class="icon-btn" id="fsBtn" title="Full screen (F)"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-    <button class="icon-btn on" id="remoteBtn" title="Remote (R)"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/><path d="M10 14h.01M14 14h.01M10 17h.01M14 17h.01"/></svg></button>
+    <button class="icon-btn" id="moreBtn" title="More" aria-haspopup="menu"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/></svg></button>
+    <button class="icon-btn on hidden" id="remoteBtn" title="Remote (R)"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/><path d="M10 14h.01M14 14h.01M10 17h.01M14 17h.01"/></svg></button>
   </div>
   <button class="glass hidden" id="soundChip"></button>
+  <div class="menu glass hidden" id="menu" role="menu">
+    <button role="menuitem" data-act="check"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Check connection</button>
+    <button role="menuitem" data-act="share"><svg class="i" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>Invite someone</button>
+    <button role="menuitem" data-act="num"><svg class="i" viewBox="0 0 24 24"><path d="M5 5h.01M12 5h.01M19 5h.01M5 12h.01M12 12h.01M19 12h.01M5 19h.01M12 19h.01M19 19h.01"/></svg><span id="numLbl">Show number pad</span></button>
+    <button role="menuitem" data-act="edit"><svg class="i" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Edit buttons</button>
+    <button role="menuitem" data-act="remote"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/></svg><span id="remoteLbl">Hide remote</span></button>
+    <button role="menuitem" data-act="settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings</button>
+  </div>
 
   <!-- floating remote -->
   <div id="remote" class="glass"><div class="sheen"></div>
@@ -614,7 +655,7 @@ function buildRemote() {
     </div>
     <div class="row">
       <div class="rocker">${keyHTML('volup', svg('plus'))}<div class="lbl">VOL</div>${keyHTML('voldn', svg('minus'))}</div>
-      <div class="r-mid">${keyHTML('mute', svg('mute'))}${keyHTML('guide', svg('guide'))}${keyHTML('apps', svg('apps'))}</div>
+      <div class="r-mid">${keyHTML('mute', svg('mute'))}${keyHTML('guide', svg('guide'))}</div>
       <div class="rocker">${keyHTML('chup', svg('up'))}<div class="lbl">CH</div>${keyHTML('chdn', svg('down'))}</div>
     </div>
     <div class="row">${keyHTML('rew', svg('rew'))}${keyHTML('play', svg('play'))}${keyHTML('ff', svg('ff'))}</div>
@@ -665,6 +706,18 @@ function press(id, how = 'press', el) {
 const remote = $('#remote');
 const layoutKey = () => 'remote.' + (innerWidth > innerHeight ? 'land' : 'port');
 function placeRemote() {
+  const portrait = innerHeight > innerWidth, immersive = $('#watch').classList.contains('immersive');
+  remote.classList.toggle('docked', portrait && !immersive);
+  if (portrait && !immersive) {                 // docked: centred under the video, sized to the space left
+    remote.classList.remove('mini');
+    const top = 56 + safeTop() + innerWidth * 9 / 16 + 48, avail = innerHeight - top - 16 - safeBottom();
+    remote.style.fontSize = Math.min(19, (innerWidth - 32) / 13.5) + 'px';
+    const k = Math.min(1, avail / remote.offsetHeight);
+    if (k < 1) remote.style.fontSize = Math.max(10, parseFloat(remote.style.fontSize) * k) + 'px';
+    remote.style.left = (innerWidth - remote.offsetWidth) / 2 + 'px';
+    remote.style.top = top + Math.max(0, (avail - remote.offsetHeight) / 2) + 'px';
+    return;
+  }
   const s = LS.get(layoutKey(), null);
   const fs = s?.fs || (innerWidth < 500 ? Math.min(16, (innerWidth - 40) / 13.5) : 16);
   remote.style.fontSize = fs + 'px';
@@ -677,6 +730,8 @@ function placeRemote() {
   clampRemote(x, y);
   remote.classList.toggle('mini', LS.get('mini', false));
 }
+const cssPx = v => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;height:' + v; document.body.appendChild(d); const h = d.offsetHeight; d.remove(); return h; };
+const safeTop = () => cssPx('env(safe-area-inset-top)'), safeBottom = () => cssPx('env(safe-area-inset-bottom)');
 const topReserve = () => innerWidth > innerHeight ? 58 : 0;   // keep the top bar's buttons clear
 function fitRemote() {             // never taller/wider than the screen (e.g. phone in landscape)
   const fs = parseFloat(remote.style.fontSize) || 16;
@@ -695,7 +750,7 @@ function saveRemote() {
 (() => {
   let sx, sy, ox, oy, drag = false;
   $('#rHead').addEventListener('pointerdown', e => {
-    if (e.target.closest('.r-mini')) return;
+    if (e.target.closest('.r-mini') || remote.classList.contains('docked')) return;
     drag = true; sx = e.clientX; sy = e.clientY; ox = remote.offsetLeft; oy = remote.offsetTop;
     remote.classList.add('dragging'); $('#rHead').setPointerCapture(e.pointerId);
   });
@@ -816,6 +871,20 @@ $('#stage').addEventListener('pointerup', e => {
 if (LS.get('zoom', false)) $('#watch').classList.add('zoom');
 if (LS.get('immersive', false)) $('#watch').classList.add('immersive'), $('#fsBtn').classList.add('on');
 $('#backBtn').onclick = () => showConnect();
+const menu = $('#menu');
+function closeMenu() { menu.classList.add('hidden'); }
+$('#moreBtn').onclick = e => {
+  e.stopPropagation();
+  $('#numLbl').textContent = LS.get('numpad', false) ? 'Hide number pad' : 'Show number pad';
+  $('#remoteLbl').textContent = remote.classList.contains('hidden') ? 'Show remote' : 'Hide remote';
+  menu.classList.toggle('hidden');
+};
+addEventListener('pointerdown', e => { if (!menu.classList.contains('hidden') && !e.target.closest('#menu,#moreBtn')) closeMenu(); });
+menu.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return; closeMenu();
+  ({ check: () => $('#checkBtn').click(), share: () => $('#shareBtn').click(), settings: () => $('#setBtn').click(),
+     num: () => $('#numBtn').click(), edit: () => $('#editBtn').click(), remote: () => $('#remoteBtn').click() })[b.dataset.act]();
+});
 
 /* ---------------- invite: code, QR, copy link ---------------- */
 function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
