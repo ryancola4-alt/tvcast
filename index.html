@@ -269,12 +269,12 @@ const normCode = s => (s || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
 const pretty = c => c.slice(0, 4) + '-' + c.slice(4);
 const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
 
-function toast(msg, kind = '') {
+function toast(msg, kind = '', ms = 3200) {
   document.querySelectorAll('.toast').forEach(t => t.remove());
   const t = document.createElement('div');
   t.className = 'toast glass'; t.textContent = msg;
   if (kind === 'bad') t.style.color = 'var(--bad)';
-  document.body.appendChild(t); setTimeout(() => t.remove(), 3200);
+  document.body.appendChild(t); setTimeout(() => t.remove(), ms);
 }
 
 async function fetchT(url, opts = {}, ms = 6000) {
@@ -537,7 +537,7 @@ function connectControl() {
   ws.onopen = () => { ctlBackoff = 1000; ping(); };
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
-    if (m.type === 'hello' && m.box !== 'ready') toast('TV box: ' + (m.detail || m.box), 'bad');
+    if (m.type === 'hello' && m.box !== 'ready') toast('Remote: ' + (m.detail || m.box), 'bad', 7000);
     const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
     if (m.type === 'pong') { ctlRtt = Math.round(performance.now() - p.t0); drawLat(); }
     if (m.type === 'ack') { keyLat = Math.round(performance.now() - p.t0); drawLat(); if (!m.ok) { p.el?.classList.add('fail'); setTimeout(() => p.el?.classList.remove('fail'), 600); toast(m.err || 'Key failed', 'bad'); } }
@@ -832,8 +832,8 @@ async function runChecks() {
     done(c.ok ? 'ok' : 'bad', c.ok ? `${c.device} · ${c.size} @ ${c.fps} fps (${c.format}) · ${c.quality}` : c.error);
     done = step('Sound from the TV box');
     done(c.audio && c.audio !== 'none' ? 'ok' : 'warn', c.audio && c.audio !== 'none' ? c.audio + (c.av_offset_ms ? ` · lip-sync ${c.av_offset_ms} ms` : '') : 'No audio input found on the capture card.');
-    done = step('TV box control (Wi-Fi)');
-    done(st.box.state === 'ready' ? 'ok' : 'bad', st.box.state === 'ready' ? st.box.target : `${st.box.state}: ${st.box.detail}`);
+    done = step(st.box.target === 'bt' ? 'TV box control (Bluetooth)' : 'TV box control (Wi-Fi)');
+    done(st.box.state === 'ready' ? 'ok' : 'bad', st.box.state === 'ready' ? (st.box.detail || st.box.target) : `${st.box.state}: ${st.box.detail}`);
   }
   done = step('Picture and sound arriving');
   const age = performance.now() - lastFrame;

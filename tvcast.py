@@ -17,7 +17,9 @@ Usage:
   tvcast.py newcode        make a new code (old links stop working)
   tvcast.py status         quick health check
   tvcast.py findbox        scan the network for TV boxes with ADB enabled
-  tvcast.py set KEY VALUE  change a setting, e.g.  set box 192.168.1.45:5555
+  tvcast.py set KEY VALUE  change a setting, e.g.  set box 192.168.1.45:5555   (or: set box bt)
+  tvcast.py bt             Bluetooth remote status (when the box is controlled over Bluetooth)
+  tvcast.py btforget       remove Bluetooth pairings
 """
 import asyncio, base64, hashlib, hmac, ipaddress, json, logging, os, re, secrets, shutil, signal, socket, subprocess, sys, time
 from pathlib import Path
@@ -25,6 +27,7 @@ from pathlib import Path
 VERSION = "1.0.0"
 CONF_DIR = Path(os.environ.get("TVCAST_HOME", Path.home() / ".config" / "tvcast"))
 CONF_FILE = CONF_DIR / "config.json"
+BT_PORT = int(os.environ.get("TVCAST_BT_PORT", "8789"))                      # tvcast_bt.py listens here (Bluetooth remote helper)
 BIN_DIR = Path(os.environ.get("TVCAST_BIN", Path.home() / ".local" / "share" / "tvcast"))
 ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"   # no 0/1/I/L/O — easy to read aloud
 DEFAULTS = {
@@ -410,6 +413,77 @@ LINUX_TO_ANDROID = {
 }
 
 
+class BTBox:
+    """Box control through tvcast-bt: the Pi acts as a Bluetooth remote the box is paired with.
+    Used when the box doesn't allow USB debugging (set with:  tvcast set box bt)."""
+    PAIR_HINT = ("Pair it once: on the TV box open Settings → Remotes & Accessories → Add accessory, "
+                 "then pick 'TV Cast Remote'.")
+
+    def __init__(self):
+        self.target, self.state, self.detail = "bt", "connecting", ""
+        self.proc, self.mock_log, self.rw = None, [], None
+        self.lock = asyncio.Lock()
+
+    @property
+    def mock(self):
+        return False
+
+    async def _call(self, obj, timeout=4):
+        async with self.lock:
+            for attempt in (1, 2):
+                try:
+                    if not self.rw:
+                        self.rw = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", BT_PORT), 2)
+                    r, w = self.rw
+                    w.write((json.dumps(obj) + "\n").encode())
+                    await w.drain()
+                    line = await asyncio.wait_for(r.readline(), timeout)
+                    if not line:
+                        raise ConnectionError("helper closed the connection")
+                    return json.loads(line)
+                except Exception:
+                    if self.rw:
+                        self.rw[1].close()
+                        self.rw = None
+                    if attempt == 2:
+                        raise
+
+    async def worker(self):
+        while True:
+            try:
+                st = await self._call({"cmd": "status"})
+                if st.get("error"):
+                    self.state, self.detail = "error", "Bluetooth: " + st["error"]
+                elif st.get("subscribed"):
+                    self.state = "ready"
+                    self.detail = "Bluetooth · " + (", ".join(st.get("connected") or []) or "TV box")
+                elif st.get("connected"):
+                    self.state, self.detail = "connecting", "Box found, finishing pairing…"
+                else:
+                    self.state, self.detail = "not paired", self.PAIR_HINT
+            except Exception:
+                self.state, self.detail = "error", "Bluetooth helper isn't running. Run: sudo systemctl restart tvcast-bt"
+            await asyncio.sleep(2 if self.state != "ready" else 4)
+
+    async def press(self, key, mode="press"):
+        if mode == "text":
+            return {"ok": False, "err": "Typing isn't supported over Bluetooth"}
+        if not re.fullmatch(r"KEYCODE_[A-Z0-9_]+", key):
+            return {"ok": False, "err": "Over Bluetooth, pick a KEYCODE_ name (numbers aren't supported)"}
+        if self.state != "ready":
+            return {"ok": False, "err": f"box {self.state}: {self.detail}"}
+        t0 = time.monotonic()
+        try:
+            res = await self._call({"cmd": "key", "key": key, "mode": mode}, timeout=6)
+        except Exception as e:
+            return {"ok": False, "err": f"Bluetooth helper: {e}"}
+        res.setdefault("ms", int((time.monotonic() - t0) * 1000))
+        return res
+
+    async def learn(self, seconds=10):
+        return {"ok": False, "err": "Learn needs Wi-Fi (USB debugging) control. With Bluetooth, pick the key from the list and tap Test."}
+
+
 def shell_quote(s):
     s = s[:200].replace(" ", "%s")
     return "'" + s.replace("'", "'\\''") + "'"
@@ -420,7 +494,7 @@ class Service:
     def __init__(self):
         self.conf = load_conf()
         self.keys = Keys(self.conf["code"])
-        self.box = Box(self.conf["box"])
+        self.box = BTBox() if self.conf["box"] == "bt" else Box(self.conf["box"])
         self.plan = {}
         self.go2rtc = None
         self.tunnel_url = ""
@@ -777,7 +851,7 @@ def cli():
             v = v.lower() in ("1", "true", "yes", "on")
         elif isinstance(DEFAULTS[k], int):
             v = int(v)
-        if k == "box" and v not in ("", "mock") and ":" not in v:
+        if k == "box" and v not in ("", "mock", "bt") and ":" not in v:
             v += ":5555"
         conf[k] = v; save_conf(conf); print(f"  {k} = {v}")
     elif cmd == "status":
@@ -788,6 +862,22 @@ def cli():
                 print(json.dumps(json.load(r), indent=2))
         except Exception as e:
             print("Service not running:", e)
+    elif cmd in ("bt", "btforget"):
+        import socket as _s
+        try:
+            c = _s.create_connection(("127.0.0.1", BT_PORT), timeout=3); f = c.makefile("rw")
+            f.write(json.dumps({"cmd": "status" if cmd == "bt" else "forget"}) + "\n"); f.flush()
+            st = json.loads(f.readline())
+        except Exception as e:
+            sys.exit(f"  Bluetooth helper not running ({e}).  Try: sudo systemctl restart tvcast-bt")
+        if cmd == "btforget":
+            print("  Removed all pairings. Pair again from the box: Settings → Remotes & Accessories → Add accessory."); return
+        print(f"  Name:        {st.get('name')}")
+        print(f"  Advertising: {'yes' if st.get('advertising') else 'no'}{('  — ' + st['error']) if st.get('error') else ''}")
+        print(f"  Paired:      {', '.join(st.get('paired') or []) or 'nothing yet'}")
+        print(f"  Remote:      {'READY — the box is connected' if st.get('subscribed') else 'waiting for the box'}")
+        if not st.get("subscribed"):
+            print("\n  " + BTBox.PAIR_HINT)
     elif cmd == "detect":
         print(json.dumps(capture_plan(conf), indent=2)); print(ffmpeg_cmd(capture_plan(conf)) if not capture_plan(conf).get("error") else "")
     else:

@@ -30,7 +30,7 @@ chmod +x "$BIN/go2rtc" "$BIN/cloudflared"
 
 say "Installing TV Cast"
 if [ -n "$APP_URL" ]; then
-  curl -fsSL -o "$BIN/tvcast.py" "$APP_URL/pi/tvcast.py"
+  curl -fsSL -o "$BIN/tvcast.py" "$APP_URL/pi/tvcast.py" 2>/dev/null || curl -fsSL -o "$BIN/tvcast.py" "$APP_URL/tvcast.py"
 elif [ -f "$(dirname "$0")/tvcast.py" ]; then
   cp "$(dirname "$0")/tvcast.py" "$BIN/tvcast.py"
 else
