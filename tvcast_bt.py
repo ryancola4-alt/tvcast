@@ -77,7 +77,7 @@ def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus() if os.environ.get("TVCAST_BT_BUS") == "session" else dbus.SystemBus()   # session = tests
     loop = GLib.MainLoop()
-    state = {"subscribed": False, "registered": False, "advertising": False, "error": ""}
+    state = {"subscribed": False, "linked": False, "registered": False, "advertising": False, "error": ""}
 
     def ay(b):
         return dbus.Array([dbus.Byte(x) for x in b], signature="y")
@@ -157,7 +157,7 @@ def main():
 
         def send(self, data):
             self.value = bytes(data)
-            if self.notifying:
+            if self.notifying or state["linked"]:
                 self.PropertiesChanged(CHR_I, {"Value": ay(self.value)}, [])
                 return True
             return False
@@ -263,7 +263,7 @@ def main():
     advert, agent = Advertisement(), Agent()
 
     def on_subscription():
-        state["subscribed"] = kb.notifying or cc.notifying
+        state["subscribed"] = kb.notifying or cc.notifying or state["linked"]
         log.info("box %s", "connected — remote ready" if state["subscribed"] else "disconnected")
 
     # ---- adapter setup
@@ -310,8 +310,9 @@ def main():
     dbus.Interface(adapter, "org.bluez.LEAdvertisingManager1").RegisterAdvertisement(
         dbus.ObjectPath(Advertisement.PATH), {}, reply_handler=ok_ad, error_handler=fail("advertising"))
 
-    def devices():
-        objs = dbus.Interface(bus.get_object(BUS, "/"), OM).GetManagedObjects()
+    def devices(objs=None):
+        if objs is None:
+            objs = dbus.Interface(bus.get_object(BUS, "/"), OM).GetManagedObjects()
         out = []
         for path, ifaces in objs.items():
             d = ifaces.get(DEV_I)
@@ -422,7 +423,20 @@ def main():
                     reply_handler=done, error_handler=err, timeout=20)
         return True
 
+    def refresh_link():
+        # asynchronous, so it can never stall the helper while bluetoothd is busy
+        def ok(objs):
+            linked = any(d["connected"] and d["paired"] for d in devices(objs))
+            if linked != state["linked"]:
+                state["linked"] = linked
+                on_subscription()
+        dbus.Interface(bus.get_object(BUS, "/"), OM).GetManagedObjects(
+            reply_handler=ok, error_handler=lambda e: log.warning("link check: %s", e))
+        return False
+
     def on_dev_change(iface, changed, invalidated, path=None):
+        if iface == DEV_I and ("Connected" in changed or "Paired" in changed or "Bonded" in changed):
+            refresh_link()
         if iface == DEV_I and "Connected" in changed:
             log.info("box %s", "linked" if changed["Connected"] else "unlinked")
             if not changed["Connected"]:
@@ -431,6 +445,8 @@ def main():
     bus.add_signal_receiver(on_dev_change, dbus_interface=PROPS, signal_name="PropertiesChanged",
                             bus_name=BUS, path_keyword="path")
     GLib.timeout_add_seconds(15, reconnect)
+    GLib.timeout_add_seconds(5, lambda: (refresh_link(), True)[1])   # safety net: re-check the link every 5 s
+    refresh_link()
 
     srv = Server(("127.0.0.1", PORT), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
