@@ -73,6 +73,16 @@ jobs:
             echo "::error::The ASC_KEY_P8 secret isn't a valid key (${#BODY} key characters found; a real one has about 200). Paste the .p8 file's contents again."
             exit 1
           fi
+          # Ask Apple directly whether the key works, so a bad Key ID / Issuer ID shows a clear message.
+          python3 -m pip install -q --break-system-packages pyjwt cryptography 2>/dev/null || python3 -m pip install -q pyjwt cryptography
+          TOKEN=$(python3 -c "import jwt,time,sys;print(jwt.encode({'iss':sys.argv[1],'iat':int(time.time()),'exp':int(time.time())+600,'aud':'appstoreconnect-v1'},open(sys.argv[3]).read(),algorithm='ES256',headers={'kid':sys.argv[2],'typ':'JWT'}))" "$ISSUER" "$KEY_ID" "$KEY")
+          CODE=$(curl -s -o "$RUNNER_TEMP/asc.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://api.appstoreconnect.apple.com/v1/apps?filter%5BbundleId%5D=com.ryancola.tvcastapp&fields%5Bapps%5D=name,bundleId")
+          echo "App Store Connect API check: HTTP $CODE (key ID is ${#KEY_ID} characters, issuer ID is ${#ISSUER} characters)"
+          cat "$RUNNER_TEMP/asc.json"; echo
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Apple rejected the API key (HTTP $CODE). Check that ASC_KEY_ID is the Key ID of the key you downloaded, ASC_ISSUER_ID is the Issuer ID, and the key has Admin access."
+            exit 1
+          fi
           BUILD=$((100 + GITHUB_RUN_NUMBER))
           echo "Build number $BUILD"
           xcodebuild archive \
