@@ -916,7 +916,7 @@ fixHeight();
   clearTimeout(t); t = setTimeout(() => n = 0, 1200);
   if (++n < 5) return; n = 0;
   const r = $('#watch').getBoundingClientRect();
-  toast(`window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
+  toast(`v12 · window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
 }); })();
 
 /* key editor: learn / test / clear */
@@ -1239,7 +1239,7 @@ $('#installLink').onclick = async () => {
 if (matchMedia('(display-mode: standalone)').matches || navigator.standalone || /TVCastApp/.test(navigator.userAgent)) $('#installLink').classList.add('hidden');
 
 /* ---------------- start ---------------- */
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
 buildRemote();
 drawSound();
 const origShowWatch = () => { remote.classList.toggle('hidden', LS.get('remoteHidden', false)); placeRemote(); $('#remoteBtn').classList.toggle('on', !LS.get('remoteHidden', false)); };
