@@ -25,7 +25,7 @@ Usage:
 import asyncio, base64, hashlib, hmac, ipaddress, json, logging, os, re, secrets, shutil, signal, socket, subprocess, sys, time
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 HEARTBEAT = 600                      # check in with ntfy every 10 min, so the app can tell when the Pi went offline
 UPDATE_HOUR = 4                      # look for a new TV Cast version every night around 4 am
 CONF_DIR = Path(os.environ.get("TVCAST_HOME", Path.home() / ".config" / "tvcast"))
@@ -538,7 +538,10 @@ class Service:
                        "ice_servers": [{"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]}]},
             "ffmpeg": {"bin": "ffmpeg"},
             "streams": {} if self.plan.get("error") else
-                       {"tv": "exec:" + ffmpeg_cmd(self.plan, int(self.conf.get("av_offset_ms") or 0))},
+                       {"tv": "exec:" + ffmpeg_cmd(self.plan, int(self.conf.get("av_offset_ms") or 0)),
+                        # data saver: a light 360p copy for mobile data; only runs while someone watches it
+                        "tvlow": "ffmpeg:tv#video=h264#width=640#audio=opus#audio=aac"
+                                 "#raw=-r 24 -b:v 450k -maxrate 550k -bufsize 1100k -g 48 -bf 0 -b:a 64k"},
         }
         if not self.plan.get("error"):
             # Always-on: the card is opened once and kept open, so the picture starts instantly and
@@ -662,7 +665,7 @@ class Service:
             "stream": {"running": bool(self.go2rtc and self.go2rtc.returncode is None)},
             "box": {"state": self.box.state, "detail": self.box.detail, "target": self.box.target},
             "tunnel": {"url": self.tunnel_url, "published": int(self.published_at), "error": self.publish_err},
-            "lan": lan_ip(), "update": self.update_state,
+            "lan": lan_ip(), "update": self.update_state, "low": True,
         }
 
     # ---- self-update: new versions on GitHub install themselves, no SSH needed
@@ -790,7 +793,8 @@ class Service:
             await client.prepare(request)
             async with ClientSession() as s:
                 try:
-                    async with s.ws_connect("http://127.0.0.1:1984/api/ws?src=tv", max_msg_size=0) as up:
+                    src = "tvlow" if request.query.get("q") == "low" else "tv"
+                    async with s.ws_connect(f"http://127.0.0.1:1984/api/ws?src={src}", max_msg_size=0) as up:
                         async def down():
                             async for m in up:
                                 if m.type == WSMsgType.TEXT:

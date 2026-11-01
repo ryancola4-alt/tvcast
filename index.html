@@ -349,6 +349,7 @@ html:has(#watch:not(.hidden)),html:has(#watch:not(.hidden)) body{background:#000
     <button role="menuitem" data-act="gest"><svg class="i" viewBox="0 0 24 24"><path d="M9 11V5a2 2 0 0 1 4 0v6M13 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-.5A6.5 6.5 0 0 1 3 13.5V12a2 2 0 0 1 4 0"/></svg><span id="gestLbl">Swipe controls: on</span></button>
     <button role="menuitem" data-act="edit"><svg class="i" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Edit buttons</button>
     <button role="menuitem" data-act="volkeys" class="hidden" id="volKeysItem"><svg class="i" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><span id="volKeysLbl">Volume buttons: TV</span></button>
+    <button role="menuitem" data-act="saver"><svg class="i" viewBox="0 0 24 24"><path d="M2 20h20M5 20v-4M10 20V11M15 20V7M20 20V3"/></svg><span id="saverLbl">Data saver: Auto</span></button>
     <button role="menuitem" data-act="remote"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/></svg><span id="remoteLbl">Hide remote</span></button>
     <button role="menuitem" data-act="settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings</button>
   </div>
@@ -585,8 +586,40 @@ async function updatePill() {
       if (pair && pair.currentRoundTripTime != null) txt += ` · ${Math.round(pair.currentRoundTripTime * 1000)} ms`;
     } catch {}
   } else if (mode === 'mse') txt = 'Encrypted relay';
-  setPill(kind, `${txt} · ${fps || '–'} fps`);
+  linkKind = txt; setPill(kind, `${txt} · ${fps || '–'} fps${quality === 'low' ? ' · data saver' : ''}`);
 }
+
+/* ---------------- data saver: a light 360p stream for mobile data ---------------- */
+let quality = 'high', slowTicks = 0, linkKind = '', netType = '';   // netType comes from the iPhone app: 'cellular' | 'wifi'
+const saver = () => LS.get('saver', 'auto');                         // 'auto' | 'on' | 'off'
+const canLow = () => !!(cur && cur.status && cur.status.low);        // Pi 1.2+
+const streamURL = () => `${cur.url}/api/ws?t=${cur.keys.token}${quality === 'low' ? '&q=low' : ''}`;
+function wantedQuality() {
+  if (!canLow() || saver() === 'off') return 'high';
+  if (saver() === 'on') return 'low';
+  if (netType === 'cellular') return 'low';
+  if (netType === 'wifi') return 'high';
+  return quality;                                                    // no hint: keep what's working
+}
+function setQuality(q, why) {
+  if (q === quality || !cur) return;
+  quality = q; slowTicks = 0;
+  if (why) toast(why);
+  startWatching();
+}
+function adaptQuality() {
+  const want = wantedQuality();
+  if (want !== quality && (saver() !== 'auto' || netType)) { setQuality(want, want === 'low' ? 'On mobile data — data saver on' : 'Back on Wi-Fi — full quality'); return; }
+  if (saver() !== 'auto' || !canLow() || netType) return;
+  // no network hint (Safari): judge by the picture itself
+  if (quality === 'high' && lastFrame && fps > 0 && fps < 10) { if (++slowTicks >= 3) setQuality('low', 'The connection is slow — switched to data saver'); }
+  else if (quality === 'low' && /home Wi-Fi/.test(linkKind) && fps >= 20) { if (++slowTicks >= 5) setQuality('high', 'Fast connection — full quality'); }
+  else slowTicks = 0;
+}
+window.tvcastNet = t => {                                            // iPhone app tells us when Wi-Fi / cellular changes
+  netType = t === 'cellular' ? 'cellular' : t === 'wifi' ? 'wifi' : '';
+  if (cur && saver() === 'auto' && canLow()) { const w = wantedQuality(); if (w !== quality) setQuality(w, w === 'low' ? 'On mobile data — data saver on' : 'Back on Wi-Fi — full quality'); }
+};
 
 async function connectWith(dev) {
   dev = { ...(devices().find(d => d.code === normCode(dev.code)) || {}), ...dev, code: normCode(dev.code) };
@@ -600,6 +633,7 @@ async function connectWith(dev) {
     dev.seen = Math.floor(Date.now() / 1000); if (r.status.lan) dev.lan = r.status.lan;
     saveDevice(dev); LS.set('last', dev.code);
     $('#devName').textContent = dev.name;
+    quality = wantedQuality(); slowTicks = 0;
     await startWatching();
   } catch (e) {
     if (e.offline) { saveDevice(dev); showOffline(dev, e); return; }
@@ -673,7 +707,7 @@ async function startWatching() {
   if (player) player.remove();
   player = new PlayerClass(); lastFrame = 0; mode = '';
   $('#stage').prepend(player);
-  player.src = `${cur.url}/api/ws?t=${cur.keys.token}`;
+  player.src = streamURL();
   connectControl();
   clearInterval(watchdogTID);
   let stalled = 0, f0 = frames;
@@ -682,8 +716,12 @@ async function startWatching() {
     if (!player || (document.hidden && !inPip())) return;   // keep healing while the video floats
     if (player.video?.paused && lastFrame) return;          // you paused it
     const age = performance.now() - lastFrame;
-    if ((lastFrame && age > 8000) || (!lastFrame && ++stalled > 10)) {     // frozen: find the Pi again (tunnel may have changed)
-      stalled = 0; lastFrame = 0; await reconnect();
+    adaptQuality();
+    const patience = (quality === 'low' || mode === 'mse') ? 14000 : 8000;
+    if ((lastFrame && age > patience) || (!lastFrame && ++stalled > 10)) {     // frozen: find the Pi again (tunnel may have changed)
+      stalled = 0; lastFrame = 0;
+      if (quality === 'high' && canLow() && saver() === 'auto') { setQuality('low', 'The connection is slow — switched to data saver'); return; }
+      await reconnect();
     }
   }, 2000);
 }
@@ -695,7 +733,7 @@ async function reconnect() {
     const moved = r.url !== cur.url;
     Object.assign(cur, r); cur.dev.url = r.url; saveDevice(cur.dev);
     if (moved || !player) { await startWatching(); return; }
-    player.ondisconnect(); player.wsState = WebSocket.CLOSED; player.src = `${cur.url}/api/ws?t=${cur.keys.token}`;
+    player.ondisconnect(); player.wsState = WebSocket.CLOSED; player.src = streamURL();
     if (!ctl || ctl.readyState > 1) connectControl();
     offFails = 0;
   } catch (e) {
@@ -1046,7 +1084,7 @@ fixHeight();
   clearTimeout(t); t = setTimeout(() => n = 0, 1200);
   if (++n < 5) return; n = 0;
   const r = $('#watch').getBoundingClientRect();
-  toast(`v14 · window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
+  toast(`v15 · window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
 }); })();
 
 /* key editor: learn / test / clear */
@@ -1234,8 +1272,14 @@ menu.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return; closeMenu();
   ({ check: () => $('#checkBtn').click(), share: () => $('#shareBtn').click(), settings: () => $('#setBtn').click(),
      num: () => $('#numBtn').click(), edit: () => $('#editBtn').click(),
-     gest: () => { const g = !LS.get('gestures', true); LS.set('gestures', g); toast(g ? 'Swipe the picture to move, tap for OK' : 'Swipe controls off'); }, remote: () => $('#remoteBtn').click(), volkeys: () => setVolKeys(!LS.get('volkeys', true), true) })[b.dataset.act]();
+     gest: () => { const g = !LS.get('gestures', true); LS.set('gestures', g); toast(g ? 'Swipe the picture to move, tap for OK' : 'Swipe controls off'); }, remote: () => $('#remoteBtn').click(), volkeys: () => setVolKeys(!LS.get('volkeys', true), true),
+     saver: () => { const n = { auto: 'on', on: 'off', off: 'auto' }[saver()]; LS.set('saver', n); drawSaver();
+       toast(n === 'auto' ? 'Data saver: automatic — light picture on mobile data' : n === 'on' ? 'Data saver on — light picture everywhere' : 'Data saver off — full quality everywhere');
+       if (!canLow() && n !== 'off') toast('Your Pi needs the latest update for data saver'); else setQuality(wantedQuality()); } })[b.dataset.act]();
 });
+
+function drawSaver() { const l = $('#saverLbl'); if (l) l.textContent = 'Data saver: ' + { auto: 'Auto', on: 'On', off: 'Off' }[saver()]; }
+drawSaver();
 
 /* ---------------- favorites: one tap to a channel or app ---------------- */
 let recording = null, recName = '', playingFav = false;

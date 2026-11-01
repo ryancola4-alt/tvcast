@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import AVFoundation
 import MediaPlayer
+import Network
 
 enum AppConfig {
     /// Your TV Cast web app. Change this if you move it to a different address.
@@ -66,6 +67,8 @@ struct WebView: UIViewRepresentable {
         let volumeKeys = VolumeKeys()
         private let lightTap = UIImpactFeedbackGenerator(style: .light)
         private let mediumTap = UIImpactFeedbackGenerator(style: .medium)
+        private let netMonitor = NWPathMonitor()
+        private var netType = ""
 
         init(home: URL) {
             self.home = home
@@ -75,6 +78,21 @@ struct WebView: UIViewRepresentable {
                                                   completionHandler: nil)
             }
             lightTap.prepare()
+            // Wi-Fi or cellular? The page uses this to switch the light "data saver" picture on and off.
+            netMonitor.pathUpdateHandler = { [weak self] path in
+                let type = path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet) ? "wifi"
+                         : path.usesInterfaceType(.cellular) ? "cellular" : ""
+                DispatchQueue.main.async {
+                    guard let self, type != self.netType else { return }
+                    self.netType = type
+                    self.sendNet()
+                }
+            }
+            netMonitor.start(queue: DispatchQueue(label: "tvcast.net"))
+        }
+
+        private func sendNet() {
+            webView?.evaluateJavaScript("window.tvcastNet && window.tvcastNet('\(netType)')", completionHandler: nil)
         }
 
         // MARK: messages from the page
@@ -108,6 +126,7 @@ struct WebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             sendPosture()   // a freshly loaded page needs to know how the phone is folded
+            sendNet()       // ...and whether it's on Wi-Fi or cellular
         }
 
         // Coming back to the app: tell the page to check its connection right away.
