@@ -245,6 +245,25 @@ ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 
 @media (orientation:portrait){
   #watch:not(.immersive) .pill{top:calc(100% + 12px);bottom:auto;left:16px;background:none;border:0;backdrop-filter:none;-webkit-backdrop-filter:none;padding:0;color:var(--mute)}
 }
+/* ===== big screens (iPhone Duo unfolded, iPad) ===== */
+/* wide remote: d-pad on the left, the other buttons on the right */
+#remote.wide{width:auto}
+#remote.wide #rBody{display:grid;grid-template-columns:12.4em 15em;column-gap:1.6em;align-items:center}
+#remote.wide #rBody>.dpad{grid-column:1;grid-row:1/span 3;margin:0 auto}
+#remote.wide #rBody>.row{grid-column:2}
+#remote.wide #rBody>.numpad{grid-column:1/-1}
+#remote.wide #rBody>.lat{grid-column:1/-1}
+/* stack: video across the top, wide remote underneath (Duo open, held upright) */
+#watch.stack #stage{inset:auto 0 auto 0!important;top:calc(56px + var(--safe-t))!important;aspect-ratio:16/9!important;width:100%!important;height:auto!important}
+#watch.stack .pill{top:calc(100% + 12px)!important;bottom:auto!important;left:16px!important;background:none;border:0;backdrop-filter:none;-webkit-backdrop-filter:none;padding:0;color:var(--mute)}
+#watch.stack #soundChip{top:calc(56px + var(--safe-t) + 56.25vw - 56px)!important;bottom:auto!important}
+/* split: video on the left, remote in its own column on the right (Duo open, held sideways) */
+#watch.split #stage{inset:0 auto 0 0!important;width:calc(100% - var(--rw))!important;height:100%!important;aspect-ratio:auto!important}
+#watch.split::after{content:"";position:absolute;top:0;bottom:0;right:0;width:var(--rw);background:#0b0d13;border-left:1px solid var(--line);z-index:2;pointer-events:none}
+#watch.split .pill{top:auto!important;bottom:calc(14px + var(--safe-b))!important;left:calc(14px + var(--safe-l))!important;opacity:1!important}
+#watch.split #soundChip{left:calc((100% - var(--rw)) / 2)!important;top:auto!important;bottom:calc(16px + var(--safe-b))!important}
+#watch.split.idle .topbar,#watch.stack.idle .topbar{opacity:1;pointer-events:auto}
+#watch.split.idle .pill,#watch.stack.idle .pill{opacity:1}
 </style>
 </head>
 <body>
@@ -763,8 +782,44 @@ function press(id, how = 'press', el) {
 /* drag + resize + minimize, remembered per orientation */
 const remote = $('#remote');
 const layoutKey = () => 'remote.' + (innerWidth > innerHeight ? 'land' : 'port');
+/* big touch screens (iPhone Duo unfolded, iPad): pick whichever layout shows the most picture
+   while keeping the remote comfortably sized — video on top + wide remote, or video left + remote column */
+const isBig = () => Math.min(innerWidth, innerHeight) >= 600 && matchMedia('(pointer: coarse)').matches;
+function bigLayout() {
+  const W = innerWidth, H = innerHeight, sT = safeTop(), sB = safeBottom(), sL = safeLeft(), sR = safeRight();
+  const watch = $('#watch');
+  remote.classList.add('docked'); remote.classList.remove('mini');
+  const measure = wide => { remote.classList.toggle('wide', wide); remote.style.fontSize = '10px'; return [remote.offsetWidth / 10, remote.offsetHeight / 10]; };
+  // stack: video full width, wide remote below
+  const [sw, sh] = measure(true);
+  const vh = W * 9 / 16, top = 56 + sT + vh + 44, availS = H - top - 14 - sB;
+  const fsS = Math.min(24, availS / sh, (W - sL - sR - 40) / sw);
+  const areaS = W * vh;
+  // split: video left, remote column right
+  const [cw, ch] = measure(false);
+  const availC = H - 56 - sT - 16 - sB, fsC = Math.min(24, availC / ch);
+  const rw = cw * fsC + 40 + sR, vw = W - rw;
+  const areaC = Math.min(vw, H * 16 / 9) * Math.min(vw * 9 / 16, H);
+  const useStack = fsS >= 13 && (areaS >= areaC || fsC < 13);
+  if (!useStack && fsC < 13) { remote.classList.remove('wide'); return false; }   // too cramped: normal phone layout
+  watch.classList.toggle('stack', useStack); watch.classList.toggle('split', !useStack);
+  if (useStack) {
+    measure(true); remote.style.fontSize = fsS + 'px';
+    remote.style.left = sL + (W - sL - sR - remote.offsetWidth) / 2 + 'px';
+    remote.style.top = top + Math.max(0, (availS - remote.offsetHeight) / 2) + 'px';
+  } else {
+    measure(false); remote.style.fontSize = fsC + 'px';
+    watch.style.setProperty('--rw', rw + 'px');
+    remote.style.left = W - sR - 20 - remote.offsetWidth + 'px';
+    remote.style.top = 56 + sT + Math.max(0, (availC - remote.offsetHeight) / 2) + 'px';
+  }
+  return true;
+}
 function placeRemote() {
   const portrait = innerHeight > innerWidth, immersive = $('#watch').classList.contains('immersive');
+  const watch = $('#watch');
+  if (isBig() && !immersive && !remote.classList.contains('hidden') && bigLayout()) return;
+  watch.classList.toggle('stack', false); watch.classList.toggle('split', false); remote.classList.toggle('wide', false);   // toggle(…, false) never rewrites the class when unchanged, so the class observer can't loop
   remote.classList.toggle('docked', portrait && !immersive);
   if (portrait && !immersive) {                 // docked: centred under the video, sized to the space left
     remote.classList.remove('mini');
@@ -790,6 +845,8 @@ function placeRemote() {
 }
 const cssPx = v => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;height:' + v; document.body.appendChild(d); const h = d.offsetHeight; d.remove(); return h; };
 const safeTop = () => cssPx('env(safe-area-inset-top)'), safeBottom = () => cssPx('env(safe-area-inset-bottom)');
+const cssW = v => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;width:' + v; document.body.appendChild(d); const w = d.offsetWidth; d.remove(); return w; };
+const safeLeft = () => cssW('env(safe-area-inset-left)'), safeRight = () => cssW('env(safe-area-inset-right)');
 const topReserve = () => innerWidth > innerHeight ? 58 : 0;   // keep the top bar's buttons clear
 function fitRemote() {             // never taller/wider than the screen (e.g. phone in landscape)
   const fs = parseFloat(remote.style.fontSize) || 16;
@@ -832,7 +889,7 @@ function saveRemote() {
 $('#miniBtn').onclick = () => { const m = !remote.classList.contains('mini'); remote.classList.toggle('mini', m); LS.set('mini', m); clampRemote(remote.offsetLeft, remote.offsetTop); };
 $('#numBtn').onclick = () => { LS.set('numpad', !LS.get('numpad', false)); buildRemote(); fitRemote(); clampRemote(remote.offsetLeft, remote.offsetTop); };
 $('#editBtn').onclick = () => { editing = !editing; remote.classList.toggle('editing', editing); $('#editBtn').classList.toggle('on', editing); toast(editing ? 'Edit mode: tap any key to learn, test or clear it' : 'Keys saved'); };
-$('#remoteBtn').onclick = () => { const h = !remote.classList.contains('hidden'); remote.classList.toggle('hidden', h); $('#remoteBtn').classList.toggle('on', !h); LS.set('remoteHidden', h); };
+$('#remoteBtn').onclick = () => { const h = !remote.classList.contains('hidden'); remote.classList.toggle('hidden', h); $('#remoteBtn').classList.toggle('on', !h); LS.set('remoteHidden', h); placeRemote(); };
 addEventListener('resize', () => { if (!$('#watch').classList.contains('hidden')) placeRemote(); });
 
 /* key editor: learn / test / clear */
@@ -955,7 +1012,7 @@ function flash(dir) {
     if (!on() || !player) return;
     id = e.pointerId; sx = e.clientX; sy = e.clientY; t0 = performance.now(); dir = null;
     const w = $('#watch');
-    uiWasHidden = w.classList.contains('idle') && (w.classList.contains('immersive') || innerWidth > innerHeight);
+    uiWasHidden = w.classList.contains('idle') && (w.classList.contains('immersive') || (innerWidth > innerHeight && !w.classList.contains('split') && !w.classList.contains('stack')));
     try { st.setPointerCapture(id); } catch {}
   });
   st.addEventListener('pointermove', e => {
@@ -1158,7 +1215,7 @@ if (matchMedia('(display-mode: standalone)').matches || navigator.standalone || 
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 buildRemote();
 drawSound();
-const origShowWatch = () => { placeRemote(); remote.classList.toggle('hidden', LS.get('remoteHidden', false)); $('#remoteBtn').classList.toggle('on', !LS.get('remoteHidden', false)); };
+const origShowWatch = () => { remote.classList.toggle('hidden', LS.get('remoteHidden', false)); placeRemote(); $('#remoteBtn').classList.toggle('on', !LS.get('remoteHidden', false)); };
 new MutationObserver(() => { if (!$('#watch').classList.contains('hidden')) requestAnimationFrame(origShowWatch); }).observe($('#watch'), { attributes: true, attributeFilter: ['class'] });
 
 (function boot() {
