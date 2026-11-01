@@ -803,7 +803,7 @@ function bigLayout() {
   const areaS = W * vh;
   // split: video left, remote column right
   const [cw, ch] = measure(false);
-  const availC = H - 56 - sT - 16 - sB, fsC = Math.min(24, availC / ch);
+  const availC = H - 56 - sT - 16 - sB, fsC = Math.min(24, availC / ch, (W * 0.3 - 40 - sR) / cw);   // remote column ≤ ~30% of the width
   const rw = cw * fsC + 40 + sR, vw = W - rw;
   const areaC = Math.min(vw, H * 16 / 9) * Math.min(vw * 9 / 16, H);
   const useStack = fsS >= 13 && (areaS >= areaC || fsC < 13);
