@@ -105,6 +105,7 @@ tv-player video{object-fit:contain;background:#000}
 #watch.immersive.idle .topbar,#watch.immersive.idle .pill{opacity:0!important;pointer-events:none!important}
 #watch.immersive .topbar{background:linear-gradient(rgba(0,0,0,.75),transparent)}
 #watch.zoom tv-player video{object-fit:cover}
+@media (max-aspect-ratio:1/1){#watch.zoom tv-player video{object-fit:contain}}   /* tall/narrow window (Split View): zoom would crop most of the picture */
 #fsBtn.on{background:rgba(122,162,255,.25);border-color:rgba(122,162,255,.5)}
 .hint{position:absolute;z-index:7;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 16px;border-radius:14px;font-size:14px;pointer-events:none;animation:fade .2s;transition:opacity .4s}
 @media (orientation:portrait){#watch.idle .topbar{opacity:1;pointer-events:auto}}
@@ -901,14 +902,8 @@ addEventListener('resize', () => { if (!$('#watch').classList.contains('hidden')
 /* iOS home-screen apps can keep a stale, too-short height after rotating or unfolding (iPhone Duo).
    Re-measure a few times after each change and size the watch screen to the real full height. */
 function fixHeight() {
-  const land = innerWidth > innerHeight;
   const cand = [innerHeight, document.documentElement.clientHeight, visualViewport?.height || 0];
   let h = Math.max(...cand);
-  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-  if (standalone) {   // the screen's own size, matched to the current orientation
-    const sh = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
-    if (sh > h && sh < h * 1.3) h = sh;
-  }
   try { scrollTo(0, 0); } catch {}
   document.documentElement.style.setProperty('--appH', h + 'px');
   if (!$('#watch').classList.contains('hidden')) placeRemote();
