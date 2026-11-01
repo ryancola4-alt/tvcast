@@ -265,6 +265,12 @@ ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 
 #watch.split #soundChip{left:calc((100% - var(--rw)) / 2)!important;top:auto!important;bottom:calc(16px + var(--safe-b))!important}
 #watch.split.idle .topbar,#watch.stack.idle .topbar{opacity:1;pointer-events:auto}
 #watch.split.idle .pill,#watch.stack.idle .pill{opacity:1}
+/* tabletop: Duo half-folded with the fold across the middle - video on the standing half, remote on the flat half */
+#watch.table #stage{inset:0 0 auto 0!important;height:var(--foldY,50%)!important;width:100%!important;aspect-ratio:auto!important}
+#watch.table::after{content:"";position:absolute;left:0;right:0;bottom:0;top:var(--foldY,50%);background:#0b0d13;border-top:1px solid var(--line);z-index:2;pointer-events:none}
+#watch.table .pill{top:auto!important;bottom:12px!important;left:calc(14px + var(--safe-l))!important;opacity:1!important}
+#watch.table #soundChip{top:auto!important;bottom:16px!important}
+#watch.table.idle .topbar{opacity:1;pointer-events:auto}
 /* fill the whole screen even when iOS reports a stale height after unfolding/rotating */
 #watch{bottom:auto;height:100vh;height:100lvh;height:var(--appH,100lvh)}
 html:has(#watch:not(.hidden)),html:has(#watch:not(.hidden)) body{background:#000}
@@ -323,6 +329,7 @@ html:has(#watch:not(.hidden)),html:has(#watch:not(.hidden)) body{background:#000
     <button role="menuitem" data-act="num"><svg class="i" viewBox="0 0 24 24"><path d="M5 5h.01M12 5h.01M19 5h.01M5 12h.01M12 12h.01M19 12h.01M5 19h.01M12 19h.01M19 19h.01"/></svg><span id="numLbl">Show number pad</span></button>
     <button role="menuitem" data-act="gest"><svg class="i" viewBox="0 0 24 24"><path d="M9 11V5a2 2 0 0 1 4 0v6M13 10V8a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-.5A6.5 6.5 0 0 1 3 13.5V12a2 2 0 0 1 4 0"/></svg><span id="gestLbl">Swipe controls: on</span></button>
     <button role="menuitem" data-act="edit"><svg class="i" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Edit buttons</button>
+    <button role="menuitem" data-act="volkeys" class="hidden" id="volKeysItem"><svg class="i" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><span id="volKeysLbl">Volume buttons: TV</span></button>
     <button role="menuitem" data-act="remote"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/></svg><span id="remoteLbl">Hide remote</span></button>
     <button role="menuitem" data-act="settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings</button>
   </div>
@@ -360,7 +367,10 @@ const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const normCode = s => (s || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
 const pretty = c => c.slice(0, 4) + '-' + c.slice(4);
-const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+const nativeApp = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tvcast);
+const toApp = msg => { try { nativeApp && window.webkit.messageHandlers.tvcast.postMessage(msg); } catch {} };
+// iPhone app: a real tap you can feel (iOS ignores navigator.vibrate); elsewhere: vibrate if supported
+const vib = ms => { if (nativeApp) { toApp({ type: 'haptic', strength: ms >= 20 ? 'medium' : 'light' }); return; } try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
 
 function toast(msg, kind = '', ms = 3200) {
   document.querySelectorAll('.toast').forEach(t => t.remove());
@@ -809,7 +819,7 @@ function bigLayout() {
   const areaC = Math.min(vw, H * 16 / 9) * Math.min(vw * 9 / 16, H);
   const useStack = fsS >= 13 && (areaS >= areaC || fsC < 13);
   if (!useStack && fsC < 13) { remote.classList.remove('wide'); return false; }   // too cramped: normal phone layout
-  watch.classList.toggle('stack', useStack); watch.classList.toggle('split', !useStack);
+  watch.classList.toggle('table', false); watch.classList.toggle('stack', useStack); watch.classList.toggle('split', !useStack);
   if (useStack) {
     measure(true); remote.style.fontSize = fsS + 'px';
     remote.style.left = sL + (W - sL - sR - remote.offsetWidth) / 2 + 'px';
@@ -822,10 +832,38 @@ function bigLayout() {
   }
   return true;
 }
+/* fold posture: the iPhone app reports the Duo's hinge; Safari reports it only if its Device Posture flag is on */
+let posture = 'flat';
+window.tvcastPosture = p => { const n = p === 'folded' ? 'folded' : 'flat'; if (n !== posture) { posture = n; if (!$('#watch').classList.contains('hidden')) placeRemote(); } };
+try { const dp = navigator.devicePosture; if (dp) { const u = () => window.tvcastPosture(dp.type); dp.addEventListener('change', u); u(); } } catch {}
+function foldLayout() {     // half-folded: put the fold between the picture and the remote
+  const W = innerWidth, H = innerHeight, sT = safeTop(), sB = safeBottom(), sL = safeLeft(), sR = safeRight(), watch = $('#watch');
+  remote.classList.add('docked'); remote.classList.remove('mini');
+  const measure = wide => { remote.classList.toggle('wide', wide); remote.style.fontSize = '10px'; return [remote.offsetWidth / 10, remote.offsetHeight / 10]; };
+  if (H > W) {              // tabletop: fold runs across - video on top half, remote on the bottom half
+    const fy = H / 2, [w1, h1] = measure(true);
+    watch.classList.toggle('table', true); watch.classList.toggle('split', false); watch.classList.toggle('stack', false);
+    watch.style.setProperty('--foldY', fy + 'px');
+    const avail = H - fy - 24 - sB, fs = Math.min(24, avail / h1, (W - sL - sR - 32) / w1);
+    remote.style.fontSize = fs + 'px';
+    remote.style.left = sL + (W - sL - sR - remote.offsetWidth) / 2 + 'px';
+    remote.style.top = fy + 12 + Math.max(0, (avail - remote.offsetHeight) / 2) + 'px';
+  } else {                  // book: fold runs down the middle - video left, remote right
+    const half = W / 2, [w1, h1] = measure(false);
+    watch.classList.toggle('table', false); watch.classList.toggle('stack', false); watch.classList.toggle('split', true);
+    watch.style.setProperty('--rw', half + 'px');
+    const avail = H - 56 - sT - 16 - sB, fs = Math.min(24, avail / h1, (half - 40 - sR) / w1);
+    remote.style.fontSize = fs + 'px';
+    remote.style.left = half + (half - sR - remote.offsetWidth) / 2 + 'px';
+    remote.style.top = 56 + sT + Math.max(0, (avail - remote.offsetHeight) / 2) + 'px';
+  }
+}
 function placeRemote() {
   const portrait = innerHeight > innerWidth, immersive = $('#watch').classList.contains('immersive');
   const watch = $('#watch');
   watch.classList.toggle('big', isBig());
+  if (posture === 'folded' && !immersive && !remote.classList.contains('hidden')) { watch.classList.toggle('big', true); foldLayout(); return; }
+  watch.classList.toggle('table', false);
   if (isBig() && !immersive && !remote.classList.contains('hidden') && bigLayout()) return;
   watch.classList.toggle('stack', false); watch.classList.toggle('split', false); remote.classList.toggle('wide', false);   // toggle(…, false) never rewrites the class when unchanged, so the class observer can't loop
   remote.classList.toggle('docked', portrait && !immersive);
@@ -916,7 +954,7 @@ fixHeight();
   clearTimeout(t); t = setTimeout(() => n = 0, 1200);
   if (++n < 5) return; n = 0;
   const r = $('#watch').getBoundingClientRect();
-  toast(`v12 · window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
+  toast(`v13 · window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
 }); })();
 
 /* key editor: learn / test / clear */
@@ -1104,8 +1142,21 @@ menu.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return; closeMenu();
   ({ check: () => $('#checkBtn').click(), share: () => $('#shareBtn').click(), settings: () => $('#setBtn').click(),
      num: () => $('#numBtn').click(), edit: () => $('#editBtn').click(),
-     gest: () => { const g = !LS.get('gestures', true); LS.set('gestures', g); toast(g ? 'Swipe the picture to move, tap for OK' : 'Swipe controls off'); }, remote: () => $('#remoteBtn').click() })[b.dataset.act]();
+     gest: () => { const g = !LS.get('gestures', true); LS.set('gestures', g); toast(g ? 'Swipe the picture to move, tap for OK' : 'Swipe controls off'); }, remote: () => $('#remoteBtn').click(), volkeys: () => setVolKeys(!LS.get('volkeys', true), true) })[b.dataset.act]();
 });
+
+/* ---------------- iPhone app: phone volume buttons control the TV ---------------- */
+function setVolKeys(on, announce) {
+  LS.set('volkeys', on); toApp({ type: 'volumeKeys', on });
+  $('#volKeysLbl').textContent = on ? 'Volume buttons: TV' : 'Volume buttons: phone';
+  if (announce) toast(on ? 'Phone volume buttons now change the TV volume' : 'Volume buttons control the phone again');
+}
+window.tvcastVolumeKey = dir => {
+  const id = dir === 'up' ? 'volup' : 'voldn';
+  press(id, 'press', remote.querySelector(`[data-k="${id}"]`));
+  vib(8);
+};
+if (nativeApp) { $('#volKeysItem').classList.remove('hidden'); setVolKeys(LS.get('volkeys', true), false); }
 
 /* ---------------- invite: code, QR, copy link ---------------- */
 function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }

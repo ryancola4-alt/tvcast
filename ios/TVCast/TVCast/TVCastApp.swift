@@ -35,6 +35,7 @@ struct ContentView: View {
             .statusBarHidden(true)
             .persistentSystemOverlays(.hidden)      // fades the home bar while watching
             .preferredColorScheme(.dark)
+            .modifier(HingeWatcher())
             .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
             .onChange(of: phase) { newPhase in
                 // Keep the screen awake while the app is open; let it sleep otherwise.
@@ -43,5 +44,25 @@ struct ContentView: View {
                     try? AVAudioSession.sharedInstance().setActive(true)
                 }
             }
+    }
+}
+
+extension Notification.Name {
+    /// Posted with `object: Bool` (true = half-folded) whenever the iPhone Duo's hinge changes.
+    static let tvcastPosture = Notification.Name("TVCastPosture")
+}
+
+/// iPhone Duo: tell the page when the phone is half-folded (tabletop or book), so it can put the
+/// picture on one half and the remote on the other. Does nothing on phones without a hinge.
+struct HingeWatcher: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content.onHingeChange { _, newContext in
+                let folded = newContext.hinge?.status == .partiallyOpen
+                NotificationCenter.default.post(name: .tvcastPosture, object: folded)
+            }
+        } else {
+            content
+        }
     }
 }
