@@ -103,6 +103,7 @@ cat <<'EOF'
   Handy commands:
     tvcast code        show code / link / QR again
     tvcast status      health check
+    tvcast update      install the newest version now (also happens nightly)
     tvcast newcode     new code (old invites stop working)
     journalctl -u tvcast -f    live log
 EOF

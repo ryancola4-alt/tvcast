@@ -271,6 +271,23 @@ ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 
 #watch.table .pill{top:auto!important;bottom:12px!important;left:calc(14px + var(--safe-l))!important;opacity:1!important}
 #watch.table #soundChip{top:auto!important;bottom:16px!important}
 #watch.table.idle .topbar{opacity:1;pointer-events:auto}
+/* Pi offline panel */
+#offline{position:absolute;inset:0;z-index:9;display:grid;place-items:center;padding:calc(70px + var(--safe-t)) 20px calc(20px + var(--safe-b));background:rgba(0,0,0,.86);overflow:auto}
+#offline .box{width:min(420px,100%);padding:22px 20px;border-radius:22px;background:rgba(20,22,30,.96);border:1px solid var(--line)}
+#offline h2{margin:0 0 4px;font-size:20px;display:flex;align-items:center;gap:10px}
+#offline h2 i{width:10px;height:10px;border-radius:50%;background:var(--bad);box-shadow:0 0 10px var(--bad)}
+#offline .seen{color:var(--mute);font-size:14px;margin-bottom:14px}
+#offline ol{margin:0 0 14px;padding-left:20px;color:#cdd3e1;font-size:14px} #offline li{margin:7px 0}
+#offline .ip{font:600 14px ui-monospace,Consolas,monospace;color:var(--ink);-webkit-user-select:all;user-select:all}
+#offline .again{font-size:13px;color:var(--dim);text-align:center;margin-top:10px}
+/* favorites */
+.favs{display:flex;gap:.4em;overflow-x:auto;margin:.55em 0 .1em;padding-bottom:2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.favs::-webkit-scrollbar{display:none}
+.fav{flex:none;height:2.3em;padding:0 .9em;border-radius:1.15em;border:0;background:rgba(143,180,255,.14);color:#dfe8ff;font:600 .78em/1 inherit;font-size:.78em;cursor:pointer;white-space:nowrap;touch-action:manipulation}
+.fav.add{background:rgba(255,255,255,.07);color:var(--mute)}
+.fav.playing{background:rgba(143,180,255,.4);color:#fff}
+#recbar{position:absolute;z-index:26;left:50%;transform:translateX(-50%);top:calc(64px + var(--safe-t));display:flex;gap:10px;align-items:center;padding:8px 8px 8px 14px;border-radius:999px;background:rgba(40,12,16,.94);border:1px solid rgba(248,113,113,.5);font-size:14px;white-space:nowrap}
+#recbar i{width:9px;height:9px;border-radius:50%;background:var(--bad);animation:breathe 1.2s infinite}
 /* fill the whole screen even when iOS reports a stale height after unfolding/rotating */
 #watch{bottom:auto;height:100vh;height:100lvh;height:var(--appH,100lvh)}
 html:has(#watch:not(.hidden)),html:has(#watch:not(.hidden)) body{background:#000}
@@ -323,6 +340,8 @@ html:has(#watch:not(.hidden)),html:has(#watch:not(.hidden)) body{background:#000
     <button class="icon-btn on hidden" id="remoteBtn" title="Remote (R)"><svg class="i" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="8" r="2.2"/><path d="M10 14h.01M14 14h.01M10 17h.01M14 17h.01"/></svg></button>
   </div>
   <button class="glass hidden" id="soundChip"></button>
+  <div id="offline" class="hidden"></div>
+  <div id="recbar" class="hidden"><i></i><span id="recTxt">Recording — press buttons</span><button class="btn small primary" id="recDone">Done</button><button class="btn small" id="recCancel">Cancel</button></div>
   <div class="menu glass hidden" id="menu" role="menu">
     <button role="menuitem" data-act="check"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Check connection</button>
     <button role="menuitem" data-act="share"><svg class="i" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>Invite someone</button>
@@ -426,6 +445,7 @@ async function probe(url, keys) {
   const s = await r.json();
   return { status: s, ms: Math.round(performance.now() - t0) };
 }
+const offlineErr = (msg, info) => Object.assign(new Error(msg), { offline: true, info });
 async function resolve(dev, { fresh = false } = {}) {
   const keys = await keysFor(dev.code);
   const tried = new Set();
@@ -436,21 +456,23 @@ async function resolve(dev, { fresh = false } = {}) {
   }
   if (dev.override) throw new Error('The custom server address is not answering.');
   const info = await lookup(dev.code, keys).catch(() => { throw new Error("Couldn't reach the lookup service. Check your internet."); });
-  if (!info) throw new Error('No Pi found for this code. Check the code, and that the Pi is on.');
-  if (tried.has(info.url)) throw new Error('Your Pi was found but is not answering. It may be restarting — try again in a minute.');
+  if (!info) throw offlineErr('No Pi has checked in with this code for over 12 hours.', null);
+  if (info.lan) dev.lan = info.lan;
+  if (info.ts) dev.seen = Math.max(dev.seen || 0, info.ts);
+  if (tried.has(info.url)) throw offlineErr('Your Pi is not answering.', info);
   let last;
   for (let i = 0; i < 4; i++) {          // brand-new tunnels can take a few seconds to resolve
     try { const p = await probe(info.url, keys); return { url: info.url, keys, name: info.name, ...p }; }
     catch (e) { if (e.auth) throw e; last = e; await sleep(1500); }
   }
-  throw new Error('Your Pi was found but is not answering (' + (last?.message || 'timeout') + ').');
+  throw offlineErr('Your Pi is not answering (' + (last?.message || 'timeout') + ').', info);
 }
 
 /* ---------------- devices ---------------- */
 const devices = () => LS.get('devices', []);
 function saveDevice(d) {
   const list = devices().filter(x => x.code !== d.code);
-  list.unshift({ code: d.code, name: d.name || 'TV Box', url: d.url || '', override: d.override || '' });
+  list.unshift({ code: d.code, name: d.name || 'TV Box', url: d.url || '', override: d.override || '', lan: d.lan || '', seen: d.seen || 0 });
   LS.set('devices', list.slice(0, 6));
 }
 function forgetDevice(code) { LS.set('devices', devices().filter(x => x.code !== code)); }
@@ -488,6 +510,7 @@ function drawDevices() {
   });
 }
 function showConnect(err = '') {
+  hideOffline(); stopRecording(false);
   stopWatching();
   $('#watch').classList.add('hidden'); $('#connect').classList.remove('hidden');
   $('#connErr').textContent = err; drawDevices(); drawCode();
@@ -574,13 +597,74 @@ async function connectWith(dev) {
     const r = await resolve(dev);
     cur = { dev, ...r };
     dev.url = r.url; dev.name = r.status.name || r.name || dev.name;
+    dev.seen = Math.floor(Date.now() / 1000); if (r.status.lan) dev.lan = r.status.lan;
     saveDevice(dev); LS.set('last', dev.code);
     $('#devName').textContent = dev.name;
     await startWatching();
   } catch (e) {
+    if (e.offline) { saveDevice(dev); showOffline(dev, e); return; }
     showConnect(e.auth ? 'That code was not accepted.' : e.message);
   }
 }
+
+/* ---------------- Pi offline: say so clearly, show when it was last seen, keep checking ---------------- */
+let offTID = 0, offDev = null;
+function agoText(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000), mins = Math.round((Date.now() - d) / 60000);
+  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const day = new Date().toDateString() === d.toDateString() ? 'today' :
+              new Date(Date.now() - 864e5).toDateString() === d.toDateString() ? 'yesterday' : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const ago = mins < 2 ? 'just now' : mins < 60 ? `${mins} min ago` : mins < 1440 ? `${Math.round(mins / 60)} hr ago` : `${Math.round(mins / 1440)} days ago`;
+  return `${day} at ${t} (${ago})`;
+}
+function showOffline(dev, err) {
+  stopWatching(); offDev = dev;
+  $('#connect').classList.add('hidden'); $('#watch').classList.remove('hidden'); $('#devName').textContent = dev.name || 'TV Box';
+  stageText('', false); setPill('bad', 'Offline');
+  const info = err.info, hb = (info && info.hb) || 3 * 3600, seen = dev.seen || (info && info.ts) || 0;
+  const fresh = seen && Date.now() / 1000 - seen < hb * 1.5;
+  const lan = dev.lan || (info && info.lan) || '';
+  const el = $('#offline'); el.classList.remove('hidden');
+  el.innerHTML = `<div class="box">
+    <h2><i></i>${fresh ? 'Pi not answering' : 'Your Pi is offline'}</h2>
+    <div class="seen">${seen ? (fresh ? 'It checked in ' : 'Last seen ') + agoText(seen) : 'It hasn\'t checked in for over 12 hours.'}
+      ${fresh ? ' — it may be restarting.' : ''}</div>
+    <ol>
+      <li>Check the Pi has power — a <b>red light</b> on, <b>green</b> flickering.</li>
+      <li>Check its network: cable clicked in, or the Wi-Fi it uses is up.</li>
+      <li>Unplug the Pi for 10 seconds, plug it back in, wait 2 minutes.</li>
+      ${lan ? `<li>To log in with Termius at home, use <span class="ip">${lan}</span> instead of tvcast.local.</li>` : ''}
+    </ol>
+    <div class="btnrow"><button class="btn primary" id="offRetry">Try now</button><button class="btn" id="offCode">Use a different code</button></div>
+    <div class="again" id="offAgain"></div></div>`;
+  $('#offRetry').onclick = () => checkOffline(true);
+  $('#offCode').onclick = () => showConnect();
+  vib(20);
+  scheduleOffline();
+}
+function scheduleOffline() {
+  clearTimeout(offTID);
+  let n = 20; const tick = () => {
+    const a = $('#offAgain'); if (!offDev || !a) return;
+    if (n <= 0) { checkOffline(false); return; }
+    a.textContent = `Checking again in ${n--} s`; offTID = setTimeout(tick, 1000);
+  };
+  tick();
+}
+async function checkOffline(byHand) {
+  if (!offDev) return;
+  clearTimeout(offTID); const a = $('#offAgain'); if (a) a.textContent = 'Checking…';
+  try {
+    await resolve({ ...offDev }, { fresh: true });
+    const dev = offDev; hideOffline(); toast('Your Pi is back online'); vib(20); connectWith(dev);
+  } catch (e) {
+    if (e.auth) { hideOffline(); showConnect('That code was not accepted.'); return; }
+    if (byHand) toast('Still offline');
+    scheduleOffline();
+  }
+}
+function hideOffline() { clearTimeout(offTID); offDev = null; $('#offline').classList.add('hidden'); $('#offline').innerHTML = ''; }
 
 async function startWatching() {
   stageText(cur.status.capture?.ok === false ? cur.status.capture.error : 'Starting the picture…', cur.status.capture?.ok !== false);
@@ -613,8 +697,13 @@ async function reconnect() {
     if (moved || !player) { await startWatching(); return; }
     player.ondisconnect(); player.wsState = WebSocket.CLOSED; player.src = `${cur.url}/api/ws?t=${cur.keys.token}`;
     if (!ctl || ctl.readyState > 1) connectControl();
-  } catch (e) { setPill('bad', 'Offline — retrying'); }
+    offFails = 0;
+  } catch (e) {
+    setPill('bad', 'Offline — retrying');
+    if (e.offline && ++offFails >= 2 && cur) { offFails = 0; showOffline(cur.dev, e); }
+  }
 }
+let offFails = 0;
 function stopWatching() {
   clearInterval(watchdogTID); watchdogTID = 0;
   if (player) { try { player.ondisconnect(); } catch {} player.remove(); player = null; }
@@ -752,12 +841,14 @@ function buildRemote() {
       <div class="rocker">${keyHTML('chup', svg('up'))}<div class="lbl">CH</div>${keyHTML('chdn', svg('down'))}</div>
     </div>
     <div class="row">${keyHTML('rew', svg('rew'))}${keyHTML('play', svg('play'))}${keyHTML('ff', svg('ff'))}</div>
+    <div class="favs" id="favs"></div>
     <div class="numpad ${showNum ? '' : 'hidden'}">
       ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => keyHTML('n' + n, `<span>${n}</span>`)).join('')}
       ${keyHTML('guide', svg('guide'))}${keyHTML('n0', '<span>0</span>')}${keyHTML('search', svg('search'))}
     </div>
     <div class="lat" id="lat"></div>`;
   $('#numBtn').classList.toggle('on', showNum);
+  drawFavs();
   $('#rBody').querySelectorAll('[data-k]').forEach(el => {
     el.classList.toggle('unset', el.dataset.k !== 'kbd' && !keymap[el.dataset.k]);
     bindKey(el);
@@ -790,6 +881,7 @@ function bindKey(el) {
 }
 function press(id, how = 'press', el) {
   if (id === 'kbd') { openTyping(); return; }
+  if (recording && how === 'press') { recording.push(id); $('#recTxt').textContent = `Recording — ${recording.length} press${recording.length === 1 ? '' : 'es'}`; }
   const key = keymap[id];
   if (!key) { toast(`${LABELS[id]} has no key set. Tap ✎ to set it.`); return; }
   if (el) { el.classList.add('pressed'); setTimeout(() => el.classList.remove('pressed'), 120); }
@@ -954,7 +1046,7 @@ fixHeight();
   clearTimeout(t); t = setTimeout(() => n = 0, 1200);
   if (++n < 5) return; n = 0;
   const r = $('#watch').getBoundingClientRect();
-  toast(`v13 · window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
+  toast(`v14 · window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
 }); })();
 
 /* key editor: learn / test / clear */
@@ -1145,6 +1237,78 @@ menu.addEventListener('click', e => {
      gest: () => { const g = !LS.get('gestures', true); LS.set('gestures', g); toast(g ? 'Swipe the picture to move, tap for OK' : 'Swipe controls off'); }, remote: () => $('#remoteBtn').click(), volkeys: () => setVolKeys(!LS.get('volkeys', true), true) })[b.dataset.act]();
 });
 
+/* ---------------- favorites: one tap to a channel or app ---------------- */
+let recording = null, recName = '', playingFav = false;
+const favs = () => LS.get('favs', []);
+function drawFavs() {
+  const box = $('#favs'); if (!box) return;
+  box.innerHTML = favs().map((f, i) => `<button class="fav" data-i="${i}">${f.name.replace(/[<>&"]/g, '')}</button>`).join('') +
+    `<button class="fav add" id="favAdd">${favs().length ? '+' : '+ Favorite channel'}</button>`;
+  box.querySelectorAll('.fav[data-i]').forEach(b => {
+    let t = 0, long = false;
+    b.onpointerdown = () => { long = false; t = setTimeout(() => { long = true; vib(20); editFav(+b.dataset.i); }, 600); };
+    b.onpointerup = b.onpointercancel = b.onpointerleave = () => clearTimeout(t);
+    b.onclick = () => { if (!long) playFav(+b.dataset.i, b); };
+    b.oncontextmenu = e => e.preventDefault();
+  });
+  $('#favAdd').onclick = () => addFav();
+}
+async function playFav(i, btn) {
+  const f = favs()[i]; if (!f || playingFav) return;
+  playingFav = true; btn?.classList.add('playing'); vib(8); toast(`Going to ${f.name}`);
+  for (const id of f.keys) {
+    press(id, 'press', remote.querySelector(`[data-k="${id}"]`));
+    await sleep(/^n\d$/.test(id) ? 320 : 550);
+  }
+  btn?.classList.remove('playing'); playingFav = false;
+}
+function addFav() {
+  const s = sheet(`<div class="hd"><h2>New favorite</h2>${closeBtn}</div>
+    <label class="f">Name</label><input type="text" id="fName" maxlength="20" placeholder="e.g. ESPN">
+    <label class="f">Channel number</label><input type="text" id="fNum" inputmode="numeric" maxlength="6" placeholder="e.g. 206">
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px;color:var(--mute)"><input type="checkbox" id="fOk" checked> Press OK after the number</label>
+    <div class="btnrow" style="margin-top:14px"><button class="btn primary" id="fSave">Save channel</button></div>
+    <div class="note" style="margin-top:16px">For an app or a menu instead: record the button presses that get you there.</div>
+    <button class="btn block" id="fRec">Record button presses</button>`);
+  s.querySelector('[data-close]').onclick = () => s.remove();
+  const name = () => $('#fName', s).value.trim();
+  $('#fSave', s).onclick = () => {
+    const num = $('#fNum', s).value.replace(/\D/g, '');
+    if (!num) { toast('Type a channel number, or use Record'); return; }
+    const keys = [...num].map(d => 'n' + d); if ($('#fOk', s).checked) keys.push('ok');
+    LS.set('favs', [...favs(), { name: name() || 'Ch ' + num, keys }]); s.remove(); drawFavs(); placeRemote(); toast('Saved — tap it to go there');
+  };
+  $('#fRec', s).onclick = () => { recName = name(); s.remove(); startRecording(); };
+}
+function startRecording() {
+  recording = []; $('#recTxt').textContent = 'Recording — press buttons'; $('#recbar').classList.remove('hidden');
+  if (remote.classList.contains('hidden')) $('#remoteBtn').click();
+  toast('Press the buttons that get you there, then tap Done');
+}
+function stopRecording(save) {
+  if (!recording) return;
+  const keys = recording; recording = null; $('#recbar').classList.add('hidden');
+  if (!save) return;
+  if (!keys.length) { toast('Nothing recorded'); return; }
+  const nm = recName || prompt('Name this favorite', '') || `Favorite ${favs().length + 1}`;
+  LS.set('favs', [...favs(), { name: nm.slice(0, 20), keys }]); drawFavs(); placeRemote(); toast(`Saved ${keys.length} presses`);
+}
+$('#recDone').onclick = () => stopRecording(true);
+$('#recCancel').onclick = () => stopRecording(false);
+function editFav(i) {
+  const f = favs()[i]; if (!f) return;
+  const s = sheet(`<div class="hd"><h2>${f.name.replace(/[<>&"]/g, '')}</h2>${closeBtn}</div>
+    <div class="note">${f.keys.map(k => LABELS[k] || k).join(' → ')}</div>
+    <label class="f">Name</label><input type="text" id="eName" maxlength="20">
+    <div class="btnrow" style="margin-top:14px"><button class="btn primary" id="eSave">Save</button><button class="btn" id="eLeft">Move left</button><button class="btn danger" id="eDel">Delete</button></div>`);
+  $('#eName', s).value = f.name;
+  s.querySelector('[data-close]').onclick = () => s.remove();
+  const put = list => { LS.set('favs', list); s.remove(); drawFavs(); placeRemote(); };
+  $('#eSave', s).onclick = () => { const l = favs(); l[i].name = $('#eName', s).value.trim() || l[i].name; put(l); };
+  $('#eDel', s).onclick = () => { const l = favs(); l.splice(i, 1); put(l); toast('Deleted'); };
+  $('#eLeft', s).onclick = () => { const l = favs(); if (i > 0) [l[i - 1], l[i]] = [l[i], l[i - 1]]; put(l); };
+}
+
 /* ---------------- iPhone app: phone volume buttons control the TV ---------------- */
 function setVolKeys(on, announce) {
   LS.set('volkeys', on); toApp({ type: 'volumeKeys', on });
@@ -1235,6 +1399,9 @@ $('#setBtn').onclick = async () => {
     <div class="note">Drag right if the sound is ahead of the picture, left if it's behind.</div>
     <label class="f">Name</label><input type="text" id="sN" maxlength="40">
     <div class="btnrow" style="margin-top:14px"><button class="btn primary" id="sApply">Apply</button><button class="btn" id="sRestart">Restart stream</button></div>
+    <label class="f">Pi software</label>
+    <div class="note" id="sUpd">Version ${st.version}${st.update ? (st.update.updated ? ' · updated ' + agoText(st.update.updated) : st.update.checked ? ' · checked ' + agoText(st.update.checked) : '') : ''}. New versions install themselves every night around 4 am.</div>
+    <button class="btn block" id="sUpdate">Check for update now</button>
     <label class="f">Advanced</label>
     <input type="url" id="sUrl" placeholder="Custom server address (leave empty)">
     <div class="btnrow" style="margin-top:12px"><button class="btn" id="sReset">Reset remote layout</button><button class="btn danger" id="sForget">Forget this TV</button></div>`);
@@ -1254,6 +1421,17 @@ $('#setBtn').onclick = async () => {
       cur.status = st2; cur.dev.name = st2.name; saveDevice(cur.dev); $('#devName').textContent = st2.name;
       s.remove(); toast('Saved — the picture restarts in a few seconds'); setTimeout(reconnect, 2500);
     } catch (e) { toast('Could not save: ' + e.message, 'bad'); }
+  };
+  $('#sUpdate', s).onclick = async () => {
+    const b = $('#sUpdate', s); b.disabled = true; b.textContent = 'Checking…';
+    try {
+      const r = await fetchT(`${cur.url}/api/update?t=${cur.keys.token}`, { method: 'POST' }, 60000);
+      if (r.status === 404) { b.textContent = 'This Pi needs a one-time update first'; toast('Run the install command on the Pi once to turn on automatic updates'); return; }
+      const u = await r.json();
+      if (/installed/.test(u.result)) { s.remove(); toast('Updated — the Pi restarts, reconnecting…'); setTimeout(reconnect, 8000); }
+      else { b.textContent = u.result === 'up to date' ? 'Already up to date' : u.result; }
+    } catch (e) { b.textContent = 'Check failed: ' + e.message; }
+    finally { b.disabled = false; }
   };
   $('#sRestart', s).onclick = async () => { try { await post({ restart: true }); s.remove(); toast('Restarting stream…'); setTimeout(reconnect, 2500); } catch (e) { toast(e.message, 'bad'); } };
   $('#sReset', s).onclick = () => { localStorage.removeItem('tvcast.remote.land'); localStorage.removeItem('tvcast.remote.port'); localStorage.removeItem('tvcast.keymap'); keymap = { ...DEFAULT_KEYS }; buildRemote(); placeRemote(); toast('Remote reset'); };

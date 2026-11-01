@@ -16,6 +16,7 @@ Usage:
   tvcast.py code           show the pairing code, link and QR
   tvcast.py newcode        make a new code (old links stop working)
   tvcast.py status         quick health check
+  tvcast.py update         install the newest version from GitHub now (also happens nightly)
   tvcast.py findbox        scan the network for TV boxes with ADB enabled
   tvcast.py set KEY VALUE  change a setting, e.g.  set box 192.168.1.45:5555   (or: set box bt)
   tvcast.py bt             Bluetooth remote status (when the box is controlled over Bluetooth)
@@ -24,7 +25,9 @@ Usage:
 import asyncio, base64, hashlib, hmac, ipaddress, json, logging, os, re, secrets, shutil, signal, socket, subprocess, sys, time
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+HEARTBEAT = 600                      # check in with ntfy every 10 min, so the app can tell when the Pi went offline
+UPDATE_HOUR = 4                      # look for a new TV Cast version every night around 4 am
 CONF_DIR = Path(os.environ.get("TVCAST_HOME", Path.home() / ".config" / "tvcast"))
 CONF_FILE = CONF_DIR / "config.json"
 BT_PORT = int(os.environ.get("TVCAST_BT_PORT", "8789"))                      # tvcast_bt.py listens here (Bluetooth remote helper)
@@ -34,6 +37,7 @@ DEFAULTS = {
     "name": "TV Box",
     "code": "",
     "box": "",                       # "192.168.1.45:5555", or "mock" for testing
+    "auto_update": True,              # install new versions from GitHub each night
     "app_url": "",                   # your GitHub Pages address
     "quality": "720p30",             # 480p30 720p30 720p60 1080p30
     "video_device": "auto",          # "auto", "/dev/video0", or "test"
@@ -114,6 +118,15 @@ def invite_link(conf):
 def run(cmd, timeout=8):
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except Exception:
+        return ""
+
+
+def lan_ip():
+    """The Pi's address on your home network (handy when tvcast.local doesn't resolve)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as so:
+            so.connect(("192.0.2.1", 9)); return so.getsockname()[0]
     except Exception:
         return ""
 
@@ -503,6 +516,7 @@ class Service:
         self.publish_err = ""
         self.bad_auth = {}
         self.started = time.time()
+        self.update_state = {"checked": 0, "result": "", "updated": 0}
 
     # ---- go2rtc
     def go2rtc_bin(self):
@@ -588,7 +602,8 @@ class Service:
         if not self.tunnel_url:
             return
         await asyncio.sleep(3)          # let the new hostname resolve before phones try it
-        body = self.keys.seal({"url": self.tunnel_url, "name": self.conf["name"], "ts": int(time.time())})
+        body = self.keys.seal({"url": self.tunnel_url, "name": self.conf["name"], "ts": int(time.time()),
+                               "hb": HEARTBEAT, "lan": lan_ip(), "v": VERSION})
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
                 async with s.post(f"{self.conf['ntfy'].rstrip('/')}/{self.keys.topic}", data=body,
@@ -604,7 +619,7 @@ class Service:
     async def republish_loop(self):
         while True:
             await asyncio.sleep(60)
-            if self.tunnel_url and (time.time() - self.published_at > 3 * 3600 or self.publish_err):
+            if self.tunnel_url and (time.time() - self.published_at > HEARTBEAT - 30 or self.publish_err):
                 await self.publish()
 
     async def tunnel_health(self):
@@ -647,7 +662,69 @@ class Service:
             "stream": {"running": bool(self.go2rtc and self.go2rtc.returncode is None)},
             "box": {"state": self.box.state, "detail": self.box.detail, "target": self.box.target},
             "tunnel": {"url": self.tunnel_url, "published": int(self.published_at), "error": self.publish_err},
+            "lan": lan_ip(), "update": self.update_state,
         }
+
+    # ---- self-update: new versions on GitHub install themselves, no SSH needed
+    async def check_update(self, restart=True):
+        """Download the newest tvcast.py / tvcast_bt.py from the app address; install any that changed."""
+        import aiohttp
+        base = (self.conf.get("app_url") or "").rstrip("/")
+        self.update_state["checked"] = int(time.time())
+        if not base:
+            self.update_state["result"] = "no app address set"; return self.update_state
+        me = Path(__file__).resolve()
+        files = [("tvcast.py", me, None)]
+        bt = me.parent / "tvcast_bt.py"
+        if bt.exists():
+            files.append(("tvcast_bt.py", bt, "tvcast-bt"))
+        changed = []
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:
+                for name, path, service in files:
+                    new = None
+                    for url in (f"{base}/{name}", f"{base}/pi/{name}"):
+                        try:
+                            async with s.get(url, params={"v": str(int(time.time()))}) as r:
+                                if r.status == 200:
+                                    new = await r.read(); break
+                        except Exception:
+                            pass
+                    if not new:
+                        continue
+                    try:
+                        compile(new, name, "exec")                    # never install a broken download
+                    except SyntaxError as e:
+                        log.warning("update: %s from GitHub doesn't compile (%s), skipped", name, e); continue
+                    if len(new) < 2000 or new == path.read_bytes():
+                        continue
+                    tmp = path.with_suffix(".py.new")
+                    tmp.write_bytes(new); tmp.chmod(0o755); os.replace(tmp, path)
+                    changed.append((name, service))
+        except Exception as e:
+            self.update_state["result"] = f"check failed: {e}"
+            log.warning("update check failed: %s", e); return self.update_state
+        if not changed:
+            self.update_state["result"] = "up to date"; return self.update_state
+        self.update_state.update(result="installed " + ", ".join(n for n, _ in changed), updated=int(time.time()))
+        log.info("update: %s", self.update_state["result"])
+        for name, service in changed:
+            if service:
+                await asyncio.to_thread(run, ["sudo", "-n", "systemctl", "restart", service], 20)
+        if restart and any(svc is None for _, svc in changed):
+            # systemd (Restart=always) starts the new version a few seconds after we exit
+            asyncio.get_running_loop().call_later(1.5, os._exit, 0)
+        return self.update_state
+
+    async def update_loop(self):
+        if not self.conf.get("auto_update", True):
+            return
+        await asyncio.sleep(120)
+        while True:
+            hour = time.localtime().tm_hour
+            if hour == UPDATE_HOUR and time.time() - self.update_state["checked"] > 20 * 3600:
+                await self.check_update()
+            await asyncio.sleep(600)
 
     def build_app(self):
         from aiohttp import web, ClientSession, WSMsgType
@@ -693,6 +770,11 @@ class Service:
             if restart:
                 await svc.start_stream()
             return web.json_response(svc.status())
+
+        async def update(request):
+            if not svc.authed(request):
+                return web.json_response({"error": "wrong code"}, status=401)
+            return web.json_response(await svc.check_update())
 
         async def player_js(request):
             # go2rtc's player (MIT) — served from the Pi so the web page stays tiny and in lock-step with go2rtc.
@@ -774,6 +856,7 @@ class Service:
         app.router.add_get("/api/ws", media_ws)
         app.router.add_get("/ctl", control_ws)
         app.router.add_get("/api/mocklog", mock_log)
+        app.router.add_post("/api/update", update)
         return app
 
     async def main(self):
@@ -785,7 +868,7 @@ class Service:
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1" if self.conf.get("tunnel", True) else "0.0.0.0", self.conf["port"]).start()
         tasks = [asyncio.create_task(c) for c in (self.box.worker(), self.stream_watchdog(), self.tunnel_loop(),
-                                                    self.republish_loop(), self.tunnel_health())]
+                                                    self.republish_loop(), self.tunnel_health(), self.update_loop())]
         stop = asyncio.Event()
         for sig in (signal.SIGINT, signal.SIGTERM):
             asyncio.get_running_loop().add_signal_handler(sig, stop.set)
@@ -885,6 +968,15 @@ def cli():
         print(f"  Remote:      {'READY — the box is connected' if st.get('subscribed') else 'waiting for the box'}")
         if not st.get("subscribed"):
             print("\n  " + BTBox.PAIR_HINT)
+    elif cmd == "update":
+        import urllib.request
+        keys = Keys(conf["code"])
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{conf['port']}/api/update?t={keys.token}", method="POST")
+            with urllib.request.urlopen(req, timeout=60) as r:
+                print("  " + json.load(r).get("result", "?"))
+        except Exception as e:
+            print("Service not running:", e)
     elif cmd == "detect":
         print(json.dumps(capture_plan(conf), indent=2)); print(ffmpeg_cmd(capture_plan(conf)) if not capture_plan(conf).get("error") else "")
     else:
