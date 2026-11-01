@@ -98,3 +98,39 @@ jobs:
       - name: Clean up key
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  # Free option (no paid membership): an unsigned .ipa to install with Sideloadly and a free Apple ID.
+  # Download it from the run's "Artifacts" section.
+  unsigned-ipa:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Xcode 27.1 or newer
+        run: |
+          X=$(ls -d /Applications/Xcode_27.[1-9]*.app 2>/dev/null | grep -viE 'beta|release_candidate|rc' | sort -V | tail -1)
+          [ -z "$X" ] && X=$(ls -d /Applications/Xcode_27.[1-9]*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)
+          if [ -z "$X" ]; then echo "::error::No Xcode 27.1 on this machine yet."; exit 1; fi
+          echo "Using $X"
+          sudo xcode-select -s "$X/Contents/Developer"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -q iphoneos || xcodebuild -downloadPlatform iOS
+
+      - name: Build without signing
+        run: |
+          xcodebuild build \
+            -project ios/TVCast/TVCast.xcodeproj -scheme TVCast -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=$((100 + GITHUB_RUN_NUMBER))
+          APP=$(find "$RUNNER_TEMP/dd/Build/Products/Release-iphoneos" -maxdepth 1 -name 'TVCast.app' | head -1)
+          mkdir -p "$RUNNER_TEMP/ipa/Payload" && cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/TVCast.ipa" Payload)
+          ls -lh TVCast.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TVCast-ipa
+          path: TVCast.ipa
+          retention-days: 30
