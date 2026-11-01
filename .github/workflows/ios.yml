@@ -65,7 +65,14 @@ jobs:
         if: steps.secrets.outputs.ready == 'true'
         run: |
           KEY="$RUNNER_TEMP/AuthKey.p8"
-          printf '%s\n' "$KEY_P8" > "$KEY"
+          # Rebuild a clean PEM file whatever happened when pasting (phone copy can add spaces,
+          # change or drop line breaks, or leave out the BEGIN/END lines).
+          BODY=$(printf '%s' "$KEY_P8" | tr -d '\r' | sed -e 's/-----[A-Z ]*-----//g' | tr -cd 'A-Za-z0-9+/=')
+          { echo "-----BEGIN PRIVATE KEY-----"; printf '%s' "$BODY" | fold -w 64; echo; echo "-----END PRIVATE KEY-----"; } > "$KEY"
+          if ! openssl pkey -in "$KEY" -noout 2>/dev/null; then
+            echo "::error::The ASC_KEY_P8 secret isn't a valid key (${#BODY} key characters found; a real one has about 200). Paste the .p8 file's contents again."
+            exit 1
+          fi
           BUILD=$((100 + GITHUB_RUN_NUMBER))
           echo "Build number $BUILD"
           xcodebuild archive \
