@@ -265,7 +265,7 @@ ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 
 #watch.split.idle .topbar,#watch.stack.idle .topbar{opacity:1;pointer-events:auto}
 #watch.split.idle .pill,#watch.stack.idle .pill{opacity:1}
 /* fill the whole screen even when iOS reports a stale height after unfolding/rotating */
-#watch{bottom:auto;height:100vh;height:100lvh}
+#watch{bottom:auto;height:100vh;height:100lvh;height:var(--appH,100lvh)}
 html:has(#watch:not(.hidden)),html:has(#watch:not(.hidden)) body{background:#000}
 /* big-screen full screen: the remote tucks away with the bars, any tap brings it back */
 #watch.big.immersive #remote{transition:opacity .35s}
@@ -898,6 +898,31 @@ $('#numBtn').onclick = () => { LS.set('numpad', !LS.get('numpad', false)); build
 $('#editBtn').onclick = () => { editing = !editing; remote.classList.toggle('editing', editing); $('#editBtn').classList.toggle('on', editing); toast(editing ? 'Edit mode: tap any key to learn, test or clear it' : 'Keys saved'); };
 $('#remoteBtn').onclick = () => { const h = !remote.classList.contains('hidden'); remote.classList.toggle('hidden', h); $('#remoteBtn').classList.toggle('on', !h); LS.set('remoteHidden', h); placeRemote(); };
 addEventListener('resize', () => { if (!$('#watch').classList.contains('hidden')) placeRemote(); });
+/* iOS home-screen apps can keep a stale, too-short height after rotating or unfolding (iPhone Duo).
+   Re-measure a few times after each change and size the watch screen to the real full height. */
+function fixHeight() {
+  const land = innerWidth > innerHeight;
+  const cand = [innerHeight, document.documentElement.clientHeight, visualViewport?.height || 0];
+  let h = Math.max(...cand);
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (standalone) {   // the screen's own size, matched to the current orientation
+    const sh = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+    if (sh > h && sh < h * 1.3) h = sh;
+  }
+  try { scrollTo(0, 0); } catch {}
+  document.documentElement.style.setProperty('--appH', h + 'px');
+  if (!$('#watch').classList.contains('hidden')) placeRemote();
+}
+['resize', 'orientationchange'].forEach(ev => addEventListener(ev, () => [0, 250, 700, 1500].forEach(t => setTimeout(fixHeight, t))));
+visualViewport?.addEventListener('resize', fixHeight);
+fixHeight();
+/* hidden size readout: tap the box name 5 times */
+(() => { let n = 0, t = 0; $('#devName').addEventListener('click', () => {
+  clearTimeout(t); t = setTimeout(() => n = 0, 1200);
+  if (++n < 5) return; n = 0;
+  const r = $('#watch').getBoundingClientRect();
+  toast(`window ${innerWidth}×${innerHeight} · screen ${screen.width}×${screen.height} · view ${Math.round(visualViewport?.width || 0)}×${Math.round(visualViewport?.height || 0)} · app ${Math.round(r.width)}×${Math.round(r.height)}`, '', 8000);
+}); })();
 
 /* key editor: learn / test / clear */
 function sheet(html) {
