@@ -1,0 +1,100 @@
+# Builds the TV Cast iPhone app on GitHub's Apple-silicon Mac with Xcode 27.1 (so it fills the
+# iPhone Duo screen), signs it with your developer account and sends it to TestFlight.
+# Runs whenever ios/ changes, or by hand: Actions tab → "iPhone app" → Run workflow.
+#
+# Needs four repository secrets (Settings → Secrets and variables → Actions):
+#   APPLE_TEAM_ID   your 10-character Team ID (developer.apple.com → Membership)
+#   ASC_KEY_ID      App Store Connect API key ID
+#   ASC_ISSUER_ID   App Store Connect issuer ID
+#   ASC_KEY_P8      the whole contents of the AuthKey_XXXX.p8 file
+name: iPhone app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: true
+
+jobs:
+  testflight:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      TEAM: ${{ secrets.APPLE_TEAM_ID }}
+      KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+      KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      PROJECT: ios/TVCast/TVCast.xcodeproj
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        id: secrets
+        run: |
+          if [ -z "$TEAM" ] || [ -z "$KEY_ID" ] || [ -z "$ISSUER" ] || [ -z "$KEY_P8" ]; then
+            echo "::warning::Signing secrets aren't set yet, so the app wasn't built. Add APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_P8 under Settings → Secrets and variables → Actions, then run this again."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Use Xcode 27.1 or newer
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          ls -d /Applications/Xcode*.app
+          # Newest 27.x release that is 27.1 or later; release candidates only if no final release exists.
+          X=$(ls -d /Applications/Xcode_27.[1-9]*.app 2>/dev/null | grep -viE 'beta|release_candidate|rc' | sort -V | tail -1)
+          [ -z "$X" ] && X=$(ls -d /Applications/Xcode_27.[1-9]*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)
+          if [ -z "$X" ]; then echo "::error::No Xcode 27.1 on this machine yet, so the app wouldn't fill the iPhone Duo."; exit 1; fi
+          echo "Using $X"
+          sudo xcode-select -s "$X/Contents/Developer"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -q iphoneos || xcodebuild -downloadPlatform iOS
+          xcodebuild -showsdks | grep iphoneos
+
+      - name: Build and sign
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          KEY="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$KEY_P8" > "$KEY"
+          BUILD=$((100 + GITHUB_RUN_NUMBER))
+          echo "Build number $BUILD"
+          xcodebuild archive \
+            -project "$PROJECT" -scheme TVCast -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/TVCast.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER" \
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="$BUILD"
+
+      - name: Send to TestFlight
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          KEY="$RUNNER_TEMP/AuthKey.p8"
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/TVCast.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER"
+          echo "Uploaded. It shows up in TestFlight after Apple finishes processing (usually 5-15 minutes)."
+
+      - name: Clean up key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
