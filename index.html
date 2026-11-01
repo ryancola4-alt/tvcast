@@ -264,6 +264,12 @@ ol.steps{padding-left:20px;font-size:14px;color:#cdd3e1} ol.steps li{margin:6px 
 #watch.split #soundChip{left:calc((100% - var(--rw)) / 2)!important;top:auto!important;bottom:calc(16px + var(--safe-b))!important}
 #watch.split.idle .topbar,#watch.stack.idle .topbar{opacity:1;pointer-events:auto}
 #watch.split.idle .pill,#watch.stack.idle .pill{opacity:1}
+/* fill the whole screen even when iOS reports a stale height after unfolding/rotating */
+#watch{bottom:auto;height:100vh;height:100lvh}
+html:has(#watch:not(.hidden)),html:has(#watch:not(.hidden)) body{background:#000}
+/* big-screen full screen: the remote tucks away with the bars, any tap brings it back */
+#watch.big.immersive #remote{transition:opacity .35s}
+#watch.big.immersive.idle #remote{opacity:0;pointer-events:none}
 </style>
 </head>
 <body>
@@ -818,6 +824,7 @@ function bigLayout() {
 function placeRemote() {
   const portrait = innerHeight > innerWidth, immersive = $('#watch').classList.contains('immersive');
   const watch = $('#watch');
+  watch.classList.toggle('big', isBig());
   if (isBig() && !immersive && !remote.classList.contains('hidden') && bigLayout()) return;
   watch.classList.toggle('stack', false); watch.classList.toggle('split', false); remote.classList.toggle('wide', false);   // toggle(…, false) never rewrites the class when unchanged, so the class observer can't loop
   remote.classList.toggle('docked', portrait && !immersive);
